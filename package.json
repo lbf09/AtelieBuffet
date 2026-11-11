@@ -1,0 +1,60 @@
+{
+  "name": "atelier-buffet",
+  "productName": "Ateliê Buffet",
+  "version": "1.0.0",
+  "description": "Gestão de buffet de eventos — projeto acadêmico DAD",
+  "author": "Grupo DAD",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "start": "npm run build && electron-forge start",
+    "demo": "npm run build && tsx scripts/demo.ts",
+    "build": "npm run typecheck && tsx scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "admin:reset": "tsx scripts/reset-admin.ts"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "asar": true,
+        "executableName": "AtelieBuffet",
+        "ignore": [
+          "^/(?!dist(?:/|$)|node_modules(?:/|$)|package\\.json$)"
+        ]
+      },
+      "makers": [
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "win32",
+            "linux",
+            "darwin"
+          ]
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.8",
+    "dotenv": "^17.2.3",
+    "mysql2": "^3.15.3",
+    "sql.js": "^1.15.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^8.0.1",
+    "@electron-forge/maker-zip": "^8.0.1",
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^24.10.0",
+    "@types/sql.js": "^1.4.9",
+    "electron": "45.2.1",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
