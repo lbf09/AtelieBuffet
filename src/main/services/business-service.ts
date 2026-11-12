@@ -95,7 +95,11 @@ export class BusinessService {
     const staff=await this.repo.db.query('SELECT f.name,es.job,es.cost FROM event_staff es JOIN employees f ON f.id=es.employee_id WHERE es.event_id=?',[event.id]);
     let subtotal=0;for(const item of items)subtotal+=lineTotal(item.quantity,item.unit_price);
     for(const line of [...suppliers,...staff])subtotal+=cents(line.cost);
-    const freight=cents(data.freight_base)+lineTotal(Number(data.distance_km)*Number(data.trips),data.rate_km);
+    const draft=!old||old.status==='rascunho';
+    const exempt=String(event.city).trim().toLowerCase()==='limeira'&&String(event.state).toUpperCase()==='SP';
+    if(draft&&!exempt) data.trips=2;
+    const freight=!draft ? cents(old.freight) : exempt ? 0
+      : cents(data.freight_base)+lineTotal(Number(data.distance_km)*Number(data.trips),data.rate_km);
     const total=subtotal+freight+cents(data.extra)-cents(data.discount);
     assert(total>=0,'O desconto não pode superar o valor do orçamento.');
     const max=await this.repo.db.query('SELECT COALESCE(MAX(version),0) AS maximum FROM quotes WHERE event_id=?',[event.id]);

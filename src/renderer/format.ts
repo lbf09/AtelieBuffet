@@ -13,7 +13,7 @@ const labels:Record<string,string> = {
   enviado:'Enviado',aprovado:'Aprovado',recusado:'Recusado',expirado:'Expirado',ativo:'Ativo',inativo:'Inativo',previsto:'Previsto',
   administrador:'Administrador',atendimento:'Atendimento',operacoes:'Operações',unidade:'Unidade',porcao:'Porção',kg:'Kg',litro:'Litro',pessoa:'Pessoa',
   manual:'Manual',openrouteservice:'openrouteservice',orcamento:'Orçamento',confirmacao:'Confirmação',
-  simulado:'Simulado',aceito_provedor:'Aceito pelo provedor',pendente:'Pendente',resultado_incerto:'Resultado incerto'
+  simulado:'Simulado',aceito_provedor:'Aceito pelo provedor',pendente:'Pendente',falhou:'Envio rejeitado',resultado_incerto:'Resultado incerto'
 };
 export const label = (value: unknown): string => labels[String(value)] || String(value ?? '—');
 export const badge = (value: Value): string => `<span class="status status-${escapeHtml(value)}">${escapeHtml(label(value))}</span>`;

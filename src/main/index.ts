@@ -13,9 +13,9 @@ import {IpcController} from './controllers/ipc-controller';
 import {seedDemo} from './seed';
 
 if(!app.isPackaged) {dotenv.config({quiet:true});app.setPath('userData',process.env.BUFFET_DATA_DIR||join(process.cwd(),'.data','app'));}
-// A distribuição acadêmica é uma demonstração autocontida, sem credenciais locais.
+// SQLite local e o modo de integração são configurados separadamente.
 const mode=app.isPackaged||process.env.DB_MODE!=='mysql'?'demo':'mysql';
-const apiMode='demo' as const;
+const apiMode=process.env.API_MODE==='live'?'live':'demo';
 let database:Database;let window:BrowserWindow|null=null;
 const locked=app.requestSingleInstanceLock();
 if(!locked) app.quit();

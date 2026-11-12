@@ -160,7 +160,7 @@ class BuffetApp {
     if(!old){for(const field of fields)if(data[field.key]===undefined){data[field.key]=field.options?.[0]??(field.type==='money'?0:field.type==='number'&&field.required?(field.min??0):'');}if(this.scope)data[this.scope.key]=this.scope.id;}
     if(entity==='quotes'&&!old)data.valid_until=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
     if(entity==='users')data.password='';
-    const tools=entity==='events'?`<section class="form-tools"><h3>Encontre o endereço</h3><p>Preencha o CEP e consulte o endereço. Revise antes de salvar.</p><div class="actions"><button type="button" class="btn btn-secondary btn-sm" id="cep">Consultar CEP</button><button type="button" class="btn btn-secondary btn-sm" id="geocode">Localizar coordenadas</button></div><div id="location-results"></div></section>`:entity==='quotes'?'<section class="form-tools"><h3>Distância para o frete</h3><p>Informe as coordenadas de saída; o destino vem do evento.</p><div class="form-grid"><div class="field"><label for="origin-lat">Latitude de saída</label><input id="origin-lat" type="number" min="-90" max="90" step="any" class="form-control"></div><div class="field"><label for="origin-lon">Longitude de saída</label><input id="origin-lon" type="number" min="-180" max="180" step="any" class="form-control"></div></div><button type="button" id="route" class="btn btn-secondary">Consultar distância</button><div id="route-result"></div></section>':'';
+    const tools=entity==='events'?`<section class="form-tools"><h3>Encontre o endereço</h3><p>Preencha o CEP e consulte o endereço. Revise antes de salvar.</p><div class="actions"><button type="button" class="btn btn-secondary btn-sm" id="cep">Consultar CEP</button><button type="button" class="btn btn-secondary btn-sm" id="geocode">Localizar coordenadas</button></div><div id="location-results"></div></section>`:entity==='quotes'?'<section class="form-tools"><h3>Distância para o frete</h3><p>A saída é a sede do buffet. Selecione um evento para consultar o trajeto.</p><button type="button" id="route" class="btn btn-secondary">Consultar distância</button><div id="route-result"></div></section>':'';
     this.modal(`${old?'Editar':'Cadastrar'} ${definition(entity).singular}`,`<form id="entity-form"><p class="form-note">Campos com * são obrigatórios.${entity==='quotes'?' O total é calculado ao salvar, incluindo itens, equipe e fornecedores.':''}</p>${old&&entity==='quotes'?`<div class="quote-total"><span>Total da versão ${old.version}</span><strong>${money(old.total)}</strong></div>`:''}<div class="form-grid">${fields.map(f=>this.field(f,data[f.key],old)).join('')}</div>${tools}<div class="form-error" role="alert" hidden></div></form>`,`<button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary" type="submit" form="entity-form">Salvar cadastro</button>`);
     const form=this.editor.querySelector<HTMLFormElement>('form')!;
     const get=(key:string)=>(form.elements.namedItem(key) as HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement).value;
@@ -176,19 +176,26 @@ class BuffetApp {
       this.editor.querySelector('#location-results')!.innerHTML=`<p class="api-source">${h(result.source)}. Revise o endereço e complete o número.</p>`;
     });
     wire('#geocode',async()=>{
-      const result=unwrap(await api.geocode(['street','number','district','city','state'].map(get).join(', ')));
+      const result=unwrap(await api.geocode(['street','number','district','city','state','postal_code'].map(get).filter(Boolean).join(', ')));
       const candidates=result.candidates as {label:string;coordinates:[number,number]}[];
       const box=this.editor.querySelector('#location-results')!;box.innerHTML=`<p class="api-source">${h(result.source)}. Selecione o local correto:</p>${candidates.map((c,i)=>`<button type="button" class="candidate" data-candidate="${i}">${h(c.label)}<small>${c.coordinates[1]}, ${c.coordinates[0]}</small></button>`).join('')}`;
       box.querySelectorAll<HTMLButtonElement>('[data-candidate]').forEach(b=>b.addEventListener('click',()=>{const c=candidates[Number(b.dataset.candidate)];set('longitude',c.coordinates[0]);set('latitude',c.coordinates[1]);box.textContent='Coordenadas preenchidas. Revise o local antes de salvar.';}));
     });
     wire('#route',async()=>{
       const event=this.refs.events?.find(e=>e.id===Number(get('event_id')));
-      if(!event||event.longitude===null||event.latitude===null)throw new Error('Selecione um evento com latitude e longitude cadastradas.');
-      const lat=form.querySelector<HTMLInputElement>('#origin-lat')!,lon=form.querySelector<HTMLInputElement>('#origin-lon')!;
-      if(!lat.value||!lon.value||!lat.checkValidity()||!lon.checkValidity())throw new Error('Informe coordenadas válidas para a saída do buffet.');
-      const result=unwrap(await api.route({origin:[Number(lon.value),Number(lat.value)],destination:[Number(event.longitude),Number(event.latitude)]}));
-      set('distance_km',result.km);set('distance_source',result.demo?'manual':'openrouteservice');
-      this.editor.querySelector('#route-result')!.innerHTML=`<p class="api-source">${h(result.source)}: ${h(result.km)} km, aproximadamente ${h(result.minutes)} min. Distância preenchida; revise a taxa e os percursos.</p>`;
+      if(!event) throw new Error('Selecione um evento para consultar a distância.');
+      const result=unwrap(await api.route({eventId:event.id}));
+      const box=form.querySelector('#route-result')!;
+      if(result.exempt) {
+        set('distance_km',0);
+        set('distance_source','manual');
+        box.textContent=String(result.message);
+        return;
+      }
+      set('distance_km',Number(result.km).toFixed(3));
+      set('trips',2);
+      set('distance_source',result.demo?'manual':'openrouteservice');
+      box.textContent=`${result.source}: ${Number(result.km).toLocaleString('pt-BR',{maximumFractionDigits:3})} km e aproximadamente ${Math.round(Number(result.minutes))} min por trecho. O frete considera ida e volta.`;
     });
     if(entity==='event_items')form.querySelector('[name="item_id"]')?.addEventListener('change',()=>{const item=this.refs.menu_items?.find(i=>i.id===Number(get('item_id')));if(item)set('unit_price',item.price);});
     if(entity==='event_staff'){
@@ -208,10 +215,24 @@ class BuffetApp {
     const related=await Promise.all(names.map(async e=>({entity:e,rows:unwrap(await api[e].list()).filter(r=>Number(r.event_id)===event.id)})));
     this.modal(String(event.name),`<div class="detail-heading">${badge(event.status)}<span>${h(label(event.type))} • ${event.guests} convidados</span></div><dl class="detail-grid"><div><dt>Data do evento</dt><dd>${dateTime(event.starts_at)}</dd></div><div><dt>Local</dt><dd>${h(event.venue)} • ${label(event.outdoors)}</dd></div><div><dt>Endereço</dt><dd>${h(event.street)}, ${h(event.number)}<br>${h(event.city)} / ${h(event.state)} • ${h(event.postal_code)}</dd></div><div><dt>Operação</dt><dd>Montagem: ${dateTime(event.setup_at)}<br>Desmontagem: ${dateTime(event.teardown_at)}</dd></div></dl><div class="event-links">${related.map(r=>`<button data-related="${r.entity}"><strong>${r.rows.length}</strong><span>${h(definition(r.entity).label)}</span>${icon('arrow')}</button>`).join('')}</div><section class="weather-panel"><div><h3>${icon('sun')} Previsão para o encontro</h3><p>A previsão fica disponível perto da data. Use-a para planejar eventos ao ar livre.</p></div><button class="btn btn-secondary" id="weather">Consultar previsão</button><div id="weather-result" role="status"></div></section>${event.notes?`<h3>Observações</h3><p class="preserve-lines">${h(event.notes)}</p>`:''}`);
     this.editor.querySelectorAll<HTMLButtonElement>('[data-related]').forEach(b=>b.addEventListener('click',()=>void this.act(async()=>{this.editor.close();await this.navigate(b.dataset.related as Entity,{key:'event_id',id:event.id,name:String(event.name)});})));
-    this.editor.querySelector<HTMLButtonElement>('#weather')!.addEventListener('click',e=>void this.act(async()=>{
-      const r=unwrap(await api.weather(event.id));
-      this.editor.querySelector('#weather-result')!.innerHTML=r.available?`<div class="weather-values"><strong>${h(r.min)}° — ${h(r.max)}°</strong><span>Probabilidade de chuva: ${r.rainProbability==null?'indisponível':h(r.rainProbability)+'%'}<br>Precipitação: ${r.precipitation==null?'indisponível':h(r.precipitation)+' mm'}</span></div><p class="api-source">${h(r.source)} • ${h(new Date(r.queriedAt).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}<br>Dados meteorológicos: Open-Meteo. Previsões podem mudar.</p>`:`<p>${h(r.message)}</p>`;
-    },e.currentTarget as HTMLButtonElement));
+    const button=this.editor.querySelector<HTMLButtonElement>('#weather')!;
+    const output=this.editor.querySelector<HTMLElement>('#weather-result')!;
+    const load=async()=>{
+      output.textContent='Consultando previsão…';
+      const result=await api.weather(event.id);
+      if(!result.ok) {
+        output.textContent=result.error;
+        return;
+      }
+      const r=result.data;
+      output.innerHTML=r.available
+        ?`<div class="weather-values"><strong>${h(r.min)} °C – ${h(r.max)} °C</strong><span>Probabilidade de chuva: ${h(r.rainProbability)}%<br>Precipitação: ${h(r.precipitation)} mm</span></div>
+          ${r.rainAlert?'<p role="alert"><strong>Atenção, equipe:</strong> probabilidade de chuva acima de 50% para este evento ao ar livre.</p>':''}
+          <p class="api-source">${h(r.source)} · Previsão para ${h(String(r.date).split('-').reverse().join('/'))}</p>`
+        :`<p>${h(r.message)}</p>`;
+    };
+    button.addEventListener('click',()=>void this.act(load,button));
+    void this.act(load,button);
   }
   private quoteDetail(quote:Row):void {
     const snapshot=JSON.parse(String(quote.snapshot)) as {event:Row;client:Row;items:Row[];suppliers:Row[];staff:Row[]};
