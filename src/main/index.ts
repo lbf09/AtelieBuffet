@@ -1,10 +1,10 @@
 import {bootstrap} from './bootstrap';
 import {app,BrowserWindow,dialog,Menu,session} from 'electron';
 import {join} from 'node:path';
-import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import dotenv from 'dotenv';
 import {Database} from './database';
+import {loadMigrations} from './migrations';
 import {AuthService} from './services/auth-service';
 import {EntityRepository} from './repositories/entity-repository';
 import {BusinessService} from './services/business-service';
@@ -24,8 +24,13 @@ else {
   app.whenReady().then(async()=>{
     database=new Database(mode,mode==='demo'?join(app.getPath('userData'),'buffet.sqlite'):undefined);
     await database.connect();
-    if(mode==='demo') {await database.migrate(readFileSync(join(__dirname,'../database/001_initial.sql'),'utf8'));await seedDemo(database);}
-    else {const versions=await database.query('SELECT version FROM schema_migrations WHERE version=1');if(!versions.length) throw new Error('Migração pendente.');}
+    const migrations=loadMigrations(join(__dirname,'../database'));
+    if(mode==='demo') {await database.migrateAll(migrations);await seedDemo(database);}
+    else {
+      const latest=Math.max(...migrations.map(migration=>migration.version));
+      const applied=await database.query('SELECT version FROM schema_migrations WHERE version=?',[latest]);
+      if(!applied.length) throw new Error('Migração pendente.');
+    }
     await bootstrap(database);
     const auth=new AuthService(database);const business=new BusinessService(new EntityRepository(database),auth);const integrations=new IntegrationService(business,apiMode);
     session.defaultSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));

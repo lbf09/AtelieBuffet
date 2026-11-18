@@ -22,6 +22,7 @@ export function cents(value:unknown): number {
   return result;
 }
 export const decimal = (value:number): string => {assert(Number.isSafeInteger(value)&&value>=0&&value<=9999999999,'Total fora do limite permitido.');return (value/100).toFixed(2);};
+export const signedDecimal = (value:number): string => {assert(Number.isSafeInteger(value)&&Math.abs(value)<=9999999999,'Valor fora do limite permitido.');return (value/100).toFixed(2);};
 // Quantidade com três casas × centavos, arredondando meia unidade para cima.
 export function lineTotal(quantity:unknown,price:unknown):number {
   const thousandths=Math.round(Number(quantity)*1000);
@@ -37,8 +38,9 @@ export class Validator {
       const value=input[field.key];
       if (value===undefined || value===null || value==='') {
         if (field.key==='password' && editing) continue;
+        if (field.hidden) continue;
         assert(!field.required,`Preencha ${field.label}.`);
-        output[field.key]=field.type==='number'||field.type==='date'?null:'';
+        output[field.key]=field.ref||field.type==='number'||field.type==='date'?null:'';
         continue;
       }
       assert(typeof value==='string'||typeof value==='number',`${field.label}: formato inválido.`);
@@ -52,6 +54,7 @@ export class Validator {
         assert(Number.isFinite(n)&&n>=(field.min??0)&&n<=(field.max??Number.MAX_SAFE_INTEGER),`${field.label}: valor fora do intervalo.`);
         if (!field.step) assert(Number.isInteger(n),`${field.label} deve ser inteiro.`);
         if (field.step==='0.001') assert(Math.abs(n*1000-Math.round(n*1000))<1e-6,`${field.label}: use até três casas decimais.`);
+        if (field.step==='0.01') assert(Math.abs(n*100-Math.round(n*100))<1e-6,`${field.label}: use até duas casas decimais.`);
         output[field.key]=n;
       } else {
         if(field.options) assert(field.options.includes(text),`${field.label}: opção inválida.`);

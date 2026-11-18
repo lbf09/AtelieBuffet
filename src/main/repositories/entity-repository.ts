@@ -17,7 +17,8 @@ export class EntityRepository {
   }
   async save(entity:Entity,data:Record<string,Value>,id?:number):Promise<Row> {
     validEntity(entity);
-    const allowed=new Set([...definition(entity).fields.map(f=>f.key),'password_hash','created_by','version','subtotal','freight','total','snapshot','guests','margin_amount','tax_amount','deposit_required']);
+    const allowed=new Set([...definition(entity).fields.map(f=>f.key),'password_hash','created_by','version','subtotal','freight','total','snapshot','guests','archived',
+      'menu_id','price_band_id','adults','children','adult_unit_price','child_amount','cost_amount','margin_amount','tax_amount','tax_percent','deposit_percent','deposit_required']);
     const keys=Object.keys(data);assert(keys.every(k=>allowed.has(k)),'Campo não permitido.');
     if(id) {validId(id);await this.find(entity,id);await this.db.execute(`UPDATE ${entity} SET ${keys.map(k=>`${k} = ?`).join(',')} WHERE id = ?`,[...keys.map(k=>data[k]),id]);}
     else id=await this.db.execute(`INSERT INTO ${entity} (${keys.join(',')}) VALUES (${keys.map(()=>'?').join(',')})`,keys.map(k=>data[k]));

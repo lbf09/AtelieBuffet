@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {Database} from '../src/main/database';
+import {loadMigrations} from '../src/main/migrations';
 import {bootstrap} from '../src/main/bootstrap';
 import {AuthService} from '../src/main/services/auth-service';
 import {BusinessService} from '../src/main/services/business-service';
@@ -14,7 +14,7 @@ import {today} from '../src/shared/validation';
 const commercial=entityNames.some(n=>String(n)==='price_bands');
 const input=(entity:Entity,row:Row):Input=>Object.fromEntries(definition(entity).fields.filter(f=>f.key!=='password').map(f=>[f.key,row[f.key]]));
 async function fixture(t:{after:(f:()=>Promise<void>)=>void}){
- const db=new Database('demo');await db.connect();await db.migrate(readFileSync('database/001_initial.sql','utf8'));await bootstrap(db);await seedDemo(db);
+ const db=new Database('demo');await db.connect();await db.migrateAll(loadMigrations('database'));await bootstrap(db);await seedDemo(db);
  const auth=new AuthService(db);await auth.login({login:'buffet',password:'atelie123'});const business=new BusinessService(new EntityRepository(db),auth),api=new IntegrationService(business,'demo');t.after(()=>db.close());return {db,auth,business,api};
 }
 test('conta inicial usa scrypt e não duplica usuários',async t=>{
@@ -208,6 +208,8 @@ test('Resend envia só após confirmação, preserva o histórico e impede dupli
  await assert.rejects(()=>live.previewEmail(confirmation),/aprovado e evento confirmado/);
  const sent=await business.repo.find('quotes',quote.id);
  await business.save('quotes',{...input('quotes',sent),status:'aprovado'},quote.id);
+  const approved=await business.repo.find('quotes',quote.id);
+  await business.save('installments' as Entity,{event_id:event.id,due_date:today(),amount:approved.deposit_required,paid_amount:approved.deposit_required,paid_at:today(),kind:'sinal',notes:'Sinal do teste.'});
  const updatedEvent=await business.repo.find('events',event.id);
  await business.save('events',{...input('events',updatedEvent),status:'confirmado'},event.id);
  const confirmPreview=await live.previewEmail(confirmation);
@@ -220,4 +222,111 @@ test('Resend envia só após confirmação, preserva o histórico e impede dupli
  await assert.rejects(()=>restarted.sendEmail(uncertainRetry.token),/pendente ou incerto/);
  assert.equal(fetchMock.mock.callCount(),3);
  assert.equal((await db.query('SELECT provider_id FROM email_attempts WHERE status=?',['aceito_provedor'])).length,1);
+});
+
+test('faixa de preço usa o total de convidados e diferencia crianças',async t=>{
+ const {business:b,db}=await fixture(t);
+ const events=await b.list('events');
+ const event=events.find(row=>String(row.name)==='Um novo ciclo · Marina')!;
+ assert.equal(Number(event.adults),55);
+ const first=await b.save('quotes',quoteFields(Number(event.id)));
+ assert.equal(Number(first.adults),55);
+ assert.equal(Number(first.children),5);
+ assert.equal(Number(first.adult_unit_price),95);
+ assert.equal(Math.round(Number(first.child_amount)*100),23750);
+ const band=await db.query('SELECT min_guests,max_guests FROM price_bands WHERE id=?',[first.price_band_id]);
+ assert.deepEqual([Number(band[0].min_guests),Number(band[0].max_guests)],[1,60]);
+ const revenue=Number(first.subtotal)+Number(first.freight)+Number(first.extra)-Number(first.discount);
+ assert.equal(Math.round(Number(first.total)*100),Math.round((revenue+Number(first.tax_amount))*100));
+ assert.equal(Math.round(Number(first.margin_amount)*100),Math.round((revenue-Number(first.cost_amount)-Number(first.tax_amount))*100));
+
+ const count=await db.query('SELECT * FROM event_guests WHERE event_id=?',[event.id]);
+ await b.save('event_guests',{event_id:event.id,child_band_id:Number(count[0].child_band_id),quantity:6},Number(count[0].id));
+ assert.equal(Number((await b.repo.find('events',Number(event.id))).guests),61);
+ const second=await b.save('quotes',quoteFields(Number(event.id)));
+ assert.equal(Number(second.adult_unit_price),88);
+ assert.deepEqual([Number(second.adults),Number(second.children)],[55,6]);
+
+ const free=await db.query('SELECT id FROM child_bands WHERE percent=0');
+ await b.save('event_guests',{event_id:event.id,child_band_id:Number(free[0].id),quantity:4});
+ const third=await b.save('quotes',quoteFields(Number(event.id)));
+ assert.deepEqual([Number(third.adults),Number(third.children)],[55,10]);
+ assert.equal(Number(third.adult_unit_price),88);
+ assert.equal(Math.round(Number(third.child_amount)*100),26400);
+});
+
+test('cardápio gera quantidades automáticas e permite ajuste',async t=>{
+ const {business:b,db}=await fixture(t);
+ const event=(await b.list('events')).find(row=>String(row.name)==='Um novo ciclo · Marina')!;
+ const components=await db.query('SELECT item_id,quantity FROM menu_compositions WHERE menu_id=? ORDER BY item_id',[event.menu_id]);
+ const applied=await b.applyMenu(Number(event.id));
+ assert.equal(applied.length,components.length);
+ const row=applied.find(item=>Number(item.item_id)===Number(components[0].item_id))!;
+ assert.equal(Number(row.quantity),Math.round(Number(components[0].quantity)*Number(event.guests)*1000)/1000);
+ const adjusted=Number(row.quantity)+2;
+ await b.save('event_menu_items',{event_id:event.id,item_id:Number(row.item_id),quantity:adjusted},Number(row.id));
+ assert.equal(Number((await b.repo.find('event_menu_items',Number(row.id))).quantity),adjusted);
+ const quote=await b.save('quotes',quoteFields(Number(event.id)));
+ assert.ok(Number(quote.cost_amount)>0);
+});
+
+test('cancelamento calcula multa e reembolso e aceita ajuste manual',async t=>{
+ const {business:b,db}=await fixture(t);
+ const events=await b.list('events');
+ const soon=events.find(row=>String(row.name)==='Um novo ciclo · Marina')!;
+ const later=events.find(row=>String(row.name)==='O sim de Rafael & Luiza')!;
+ await b.save('installments' as Entity,{event_id:soon.id,due_date:today(),amount:'100.00',paid_amount:'100.00',paid_at:today(),kind:'sinal',notes:''});
+ const preview=await b.previewCancellation(Number(soon.id));
+ assert.deepEqual([preview.days,preview.percent,preview.penalty,preview.refund],[4,100,'100.00','0.00']);
+ const cancelled=await b.cancelEvent({eventId:soon.id,reason:'Imprevisto do cliente'});
+ assert.equal(Number(cancelled.penalty_amount),100);
+ assert.equal((await b.repo.find('events',Number(soon.id))).status,'cancelado');
+ assert.equal((await b.cancellations()).length,1);
+
+ await b.save('installments' as Entity,{event_id:later.id,due_date:today(),amount:'200.00',paid_amount:'200.00',paid_at:today(),kind:'sinal',notes:''});
+ const policy=await b.previewCancellation(Number(later.id));
+ assert.deepEqual([policy.percent,policy.refund],[30,'140.00']);
+ const manual=await b.cancelEvent({eventId:later.id,reason:'Acordo comercial',penalty:'10.00'});
+ assert.deepEqual([Number(manual.penalty_amount),Number(manual.refund_amount)],[10,190]);
+ assert.equal(Number((await db.query('SELECT COUNT(*) AS total FROM cancellations'))[0].total),2);
+});
+
+test('confirmação exige sinal pago e parcelas somam o total',async t=>{
+ const {business:b,db}=await fixture(t);
+ const event=(await b.list('events')).find(row=>String(row.name)==='Um novo ciclo · Marina')!;
+ const draft=await b.save('quotes',quoteFields(Number(event.id)));
+ await b.save('quotes',{...input('quotes',draft),status:'enviado'},Number(draft.id));
+ const approved=await b.save('quotes',{...input('quotes',draft),status:'aprovado'},Number(draft.id));
+ await assert.rejects(()=>b.save('events',{...input('events',event),status:'confirmado'},Number(event.id)),/sinal/);
+ await b.save('installments' as Entity,{event_id:event.id,due_date:today(),amount:approved.deposit_required,paid_amount:approved.deposit_required,paid_at:today(),kind:'sinal',notes:''});
+ assert.equal((await b.save('events',{...input('events',event),status:'confirmado'},Number(event.id))).status,'confirmado');
+ const plan=await b.financePlan({eventId:Number(event.id),count:3});
+ const sum=plan.reduce((total,row)=>total+Math.round(Number(row.amount)*100),0);
+ assert.equal(sum,Math.round(Number(approved.total)*100));
+ assert.ok(plan.some(row=>row.kind==='sinal'));
+ assert.equal(Number((await db.query('SELECT COUNT(*) AS total FROM installments WHERE event_id=?',[event.id]))[0].total),4);
+});
+
+test('conflito de escala só bloqueia evento confirmado',async t=>{
+ const {business:b,db}=await fixture(t);
+ const events=await b.list('events');
+ const first=events.find(row=>String(row.name)==='Um novo ciclo · Marina')!;
+ const second=events.find(row=>String(row.name)==='Encontro Horizonte')!;
+ await db.execute('UPDATE events SET setup_at=?,starts_at=?,ends_at=?,teardown_at=? WHERE id=?',[first.setup_at,first.starts_at,first.ends_at,first.teardown_at,second.id]);
+ const employee=(await b.list('employees'))[0];
+ const shift={event_id:first.id,employee_id:employee.id,job:'Apoio',starts_at:first.setup_at,ends_at:first.teardown_at,cost:'100.00'};
+ await b.save('event_staff',shift);
+ await db.execute("UPDATE events SET status='confirmado' WHERE id=?",[second.id]);
+ await assert.rejects(()=>b.save('event_staff',{...shift,event_id:second.id}),/Conflito/);
+});
+
+test('arquivamento preserva o registro e o remove do painel',async t=>{
+ const {business:b}=await fixture(t);
+ const event=(await b.list('events'))[0];
+ const before=(await b.dashboard()).activeEvents;
+ await b.archive('events',Number(event.id),true);
+ assert.equal(Number((await b.repo.find('events',Number(event.id))).archived),1);
+ assert.equal((await b.dashboard()).activeEvents,before-1);
+ await b.archive('events',Number(event.id),false);
+ assert.equal((await b.dashboard()).activeEvents,before);
 });

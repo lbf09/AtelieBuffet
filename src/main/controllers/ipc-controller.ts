@@ -35,6 +35,14 @@ export class IpcController {
       this.register(`${entity}:save`,async(raw,id)=>this.business.save(entity,asObject(raw),id===undefined?undefined:validId(id)));
       this.register(`${entity}:remove`,async(id)=>this.business.remove(entity,validId(id)));
     }
+    this.register('record:archive',async(entity,id,archived)=>{assert(entity==='events'||entity==='quotes','Cadastro não permite arquivamento.');await this.business.archive(entity,validId(id),Boolean(archived));});
+    this.register('event:applyMenu',async(id)=>this.business.applyMenu(validId(id)));
+    this.register('event:cancelPreview',async(id)=>this.business.previewCancellation(validId(id)));
+    this.register('event:cancel',async(raw)=>this.business.cancelEvent(raw));
+    this.register('event:cancellations',async()=>this.business.cancellations());
+    this.register('quote:history',async(id)=>this.business.changeHistory(validId(id)));
+    this.register('finance:plan',async(raw)=>this.business.financePlan(raw));
+    this.register('technical:read',async()=>this.business.technical());
     this.register('integration:cep',async(raw)=>this.integrations.cep(raw));
     this.register('integration:weather',async(raw)=>this.integrations.weather(raw));
     this.register('integration:geocode',async(raw)=>this.integrations.geocode(raw));
@@ -46,9 +54,9 @@ export class IpcController {
       await this.business.authorize('quotes');
       const events=await this.business.list('events');const quotes=await this.business.list('quotes');
       const escape=(value:unknown)=>'"'+String(value??'').replace(/^[=+@\-\t\r]/,"'$&").replace(/"/g,'""')+'"';
-      const csv=[['Evento','Data','Situação','Convidados','Versão do orçamento','Situação do orçamento','Total (R$)'],...events.flatMap(event=>{
+      const csv=[['Evento','Data','Situação','Convidados','Versão do orçamento','Situação do orçamento','Total (R$)','Impostos (R$)','Margem (R$)'],...events.flatMap(event=>{
         const related=quotes.filter(q=>q.event_id===event.id);
-        return (related.length?related:[null]).map(q=>[event.name,event.starts_at,event.status,event.guests,q?.version??'',q?.status??'',q?.total??'']);
+        return (related.length?related:[null]).map(q=>[event.name,event.starts_at,event.status,event.guests,q?.version??'',q?.status??'',q?.total??'',q?.tax_amount??'',q?.margin_amount??'']);
       })].map(row=>row.map(escape).join(';')).join('\r\n');
       const path=await dialog.showSaveDialog(this.win,{title:'Exportar relatório',defaultPath:'relatorio-buffet.csv',filters:[{name:'Planilha CSV',extensions:['csv']}]});
       if(path.canceled||!path.filePath) return 'Exportação cancelada.';

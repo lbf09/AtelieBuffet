@@ -1,16 +1,19 @@
 import {definition, entities, entityNames, type ApiReply, type AppInfo, type Entity, type Field, type Input, type Result, type Row} from '../shared/models';
 import {escapeHtml as h, money, dateTime, label, badge, icon} from './format';
 
-type View = Entity | 'dashboard' | 'history';
-const operations:Entity[]=['events','menus','menu_items','menu_compositions','event_items','suppliers','event_suppliers','employees','event_staff'];
+type View = Entity | 'dashboard' | 'history' | 'technical';
+const operations:Entity[]=['events','event_menu_items','event_items','menus','menu_items','menu_compositions','suppliers','event_suppliers','employees','event_staff'];
 const descriptions:Partial<Record<View,string>>={
   clients:'Pessoas e empresas que confiam suas celebrações a você.',events:'Do primeiro contato ao último detalhe da desmontagem.',
-  menus:'Organize suas propostas gastronômicas.',menu_items:'Sabores, preços e informações sobre alérgenos.',menu_compositions:'Escolha os itens e as quantidades sugeridas de cada cardápio.',
-  event_items:'Itens contratados, com quantidade e preço preservados por evento.',suppliers:'Parceiros para completar cada celebração.',
+  event_guests:'Crianças por faixa de idade, com o percentual aplicado ao preço do adulto. A partir de 11 anos, conte como adulto.',event_menu_items:'Quantidades do cardápio calculadas para o evento, com ajuste manual.',
+  menus:'Organize suas propostas gastronômicas.',menu_items:'Sabores, preços, custos e informações sobre alérgenos.',menu_compositions:'Escolha os itens e as quantidades por convidado de cada cardápio.',
+  price_bands:'Preço por adulto em cada faixa de convidados. A faixa considera adultos e crianças.',child_bands:'Percentual do preço do adulto pago por cada faixa de idade.',
+  event_items:'Itens avulsos, cobrados além do pacote do cardápio.',suppliers:'Parceiros para completar cada celebração.',
   event_suppliers:'Serviços e valores negociados com seus parceiros.',employees:'As pessoas que fazem tudo acontecer.',event_staff:'Organize horários e evite conflitos de agenda.',
-  quotes:'Reúna os custos e prepare uma proposta para seu cliente.',users:'Gerencie quem pode acessar seu ateliê.'
+  quotes:'Pacote do cardápio, serviços, frete, impostos e margem em uma proposta.',installments:'Sinal e parcelas com vencimento e pagamento.',
+  users:'Gerencie quem pode acessar seu ateliê.',technical:'Migrações aplicadas e tentativas de envio, somente para consulta.'
 };
-const navIcons:Partial<Record<Entity,string>>={events:'calendar',clients:'people',menus:'menu',menu_items:'menu',suppliers:'box',employees:'people',quotes:'quote',users:'people'};
+const navIcons:Partial<Record<Entity,string>>={events:'calendar',event_guests:'people',event_menu_items:'menu',clients:'people',menus:'menu',menu_items:'menu',price_bands:'quote',child_bands:'people',suppliers:'box',employees:'people',event_staff:'people',quotes:'quote',installments:'quote',users:'people'};
 const api=window.buffet;
 const unwrap = <T>(result:Result<T>):T => {if(!result.ok) throw new Error(result.error);return result.data;};
 
@@ -52,7 +55,14 @@ class BuffetApp {
     return role==='administrador'||(entity!=='users'&&(role!=='operacoes'||operations.includes(entity)));
   }
   private canWrite(entity:Entity,creating=false):boolean {
-    return this.canRead(entity)&&!(this.info.user?.role==='atendimento'&&['employees','event_staff'].includes(entity))&&!(creating&&entity==='events'&&this.info.user?.role==='operacoes');
+    const role=this.info.user?.role;
+    if(!this.canRead(entity)) return false;
+    if(role==='administrador') return true;
+    if(entity==='users'||entity==='price_bands'||entity==='child_bands') return false;
+    if(entity==='employees') return false;
+    if(role==='atendimento'&&['employees','event_staff'].includes(entity)) return false;
+    if(creating&&entity==='events'&&role==='operacoes') return false;
+    return true;
   }
   private login():void {
     const setup=this.info.needsSetup;
@@ -70,7 +80,7 @@ class BuffetApp {
     this.root.innerHTML=`<div class="workspace"><aside class="sidebar"><div class="brand">${icon('menu')}<div>Ateliê <span>Buffet</span></div></div><nav aria-label="Navegação principal"><button data-view="dashboard" class="nav-item">${icon('home')} Visão geral</button>${groups.map(group=>{
       const names=entityNames.filter(e=>definition(e).group===group&&this.canRead(e));
       return names.length?`<div class="nav-group">${group}</div>${names.map(e=>`<button data-view="${e}" class="nav-item">${icon(navIcons[e]||'link')} ${h(definition(e).label)}</button>`).join('')}`:'';
-    }).join('')}${this.canRead('quotes')?`<button data-view="history" class="nav-item">${icon('mail')} Histórico de e-mails</button>`:''}</nav><div class="profile"><div class="avatar">${h(user.name.slice(0,1).toUpperCase())}</div><div><strong>${h(user.name)}</strong><small>${label(user.role)}</small></div><button id="logout" class="icon-button" aria-label="Sair da conta" title="Sair da conta">${icon('logout')}</button></div></aside><div class="workspace-main"><header class="topbar"><span id="breadcrumb">Seu ateliê / Visão geral</span><span class="mode-indicator">${this.info.apiMode==='demo'?'Demonstração • APIs simuladas':'Integrações reais'}<span class="mode-dot"></span></span></header><main id="content" tabindex="-1"></main><footer class="workspace-footer">Ateliê Buffet <span>Feito para cuidar dos detalhes.</span></footer></div></div>`;
+    }).join('')}${this.canRead('quotes')?`<button data-view="history" class="nav-item">${icon('mail')} Histórico de e-mails</button>`:''}${user.role==='administrador'?`<button data-view="technical" class="nav-item">${icon('check')} Dados técnicos</button>`:''}</nav><div class="profile"><div class="avatar">${h(user.name.slice(0,1).toUpperCase())}</div><div><strong>${h(user.name)}</strong><small>${label(user.role)}</small></div><button id="logout" class="icon-button" aria-label="Sair da conta" title="Sair da conta">${icon('logout')}</button></div></aside><div class="workspace-main"><header class="topbar"><span id="breadcrumb">Seu ateliê / Visão geral</span><span class="mode-indicator">${this.info.apiMode==='demo'?'Demonstração • APIs simuladas':'Integrações reais'}<span class="mode-dot"></span></span></header><main id="content" tabindex="-1"></main><footer class="workspace-footer">Ateliê Buffet <span>Feito para cuidar dos detalhes.</span></footer></div></div>`;
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button=>button.addEventListener('click',()=>void this.act(()=>this.navigate(button.dataset.view as View))));
     this.root.querySelector<HTMLButtonElement>('#logout')!.addEventListener('click',()=>void this.act(async()=>{window.clearInterval(this.weatherTimer);unwrap(await api.logout());this.refs={};this.rows=[];await this.start();}));
     await this.navigate('dashboard');
@@ -79,10 +89,11 @@ class BuffetApp {
   private async navigate(view:View,scope?:{key:string;id:number;name:string}):Promise<void> {
     const version=++this.version;this.view=view;this.scope=scope;this.page=0;
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===view);if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-    this.root.querySelector('#breadcrumb')!.textContent=`Seu ateliê / ${view==='dashboard'?'Visão geral':view==='history'?'Histórico de e-mails':definition(view).label}`;
+    this.root.querySelector('#breadcrumb')!.textContent=`Seu ateliê / ${view==='dashboard'?'Visão geral':view==='history'?'Histórico de e-mails':view==='technical'?'Dados técnicos':definition(view).label}`;
     this.content().innerHTML='<p class="loading" role="status">Carregando…</p>';
     if(view==='dashboard') {await this.dashboard(version);return;}
     if(view==='history') {await this.history(version);return;}
+    if(view==='technical') {await this.technical(version);return;}
     const refNames=[...new Set(definition(view).fields.flatMap(f=>f.ref&&this.canRead(f.ref)?[f.ref]:[]))];
     const [rows,...references]=await Promise.all([api[view].list(),...refNames.map(e=>api[e].list())]);
     if(version!==this.version)return;
@@ -97,8 +108,8 @@ class BuffetApp {
   }
   private display(entity:Entity,key:string,row:Row):string {
     const field=definition(entity).fields.find(f=>f.key===key),value=row[key];
-    if(field?.ref) {const related=this.refs[field.ref]?.find(r=>r.id===Number(value));return String(related?.name||related?.service||`#${value}`);}
-    if(field?.type==='money'||key==='total') return money(value);
+    if(field?.ref) {const related=this.refs[field.ref]?.find(r=>r.id===Number(value));return String(related?.name||related?.label||related?.service||`#${value}`);}
+    if(field?.type==='money'||['total','margin_amount','cost_amount','tax_amount','deposit_required','adult_unit_price','child_amount','paid_amount','amount'].includes(key)) return money(value);
     if(field?.type==='date'||field?.type==='datetime-local')return dateTime(value);
     return label(value);
   }
@@ -146,7 +157,7 @@ class BuffetApp {
     let control='';
     const common=`id="${id}" name="${field.key}" ${required?'required':''} ${field.min!==undefined?`min="${field.min}"`:''} ${field.max!==undefined?`max="${field.max}"`:''}`;
     if(field.type==='select') {
-      const options=field.ref?(this.refs[field.ref]||[]).map(r=>({value:String(r.id),text:String(r.name||`#${r.id}`)})):field.options!.map(v=>({value:v,text:label(v)}));
+      const options=field.ref?(this.refs[field.ref]||[]).map(r=>({value:String(r.id),text:String(r.name||r.label||r.service||`#${r.id}`)})):field.options!.map(v=>({value:v,text:label(v)}));
       if(field.ref&&value&&!options.some(o=>o.value===String(value)))options.push({value:String(value),text:`#${value}`});
       control=`<select class="form-select" ${common}><option value="">Selecione…</option>${options.map(o=>`<option value="${h(o.value)}" ${String(value)===o.value?'selected':''}>${h(o.text)}</option>`).join('')}</select>`;
     } else if(field.type==='textarea')control=`<textarea class="form-control" ${common} maxlength="2000" rows="3">${h(value)}</textarea>`;
@@ -158,10 +169,13 @@ class BuffetApp {
     for(const ref of new Set(fields.flatMap(f=>f.ref&&this.canRead(f.ref)?[f.ref]:[])))this.refs[ref]=unwrap(await api[ref].list());
     const data:Input={...prefill,...old};
     if(!old){for(const field of fields)if(data[field.key]===undefined){data[field.key]=field.options?.[0]??(field.type==='money'?0:field.type==='number'&&field.required?(field.min??0):'');}if(this.scope)data[this.scope.key]=this.scope.id;}
-    if(entity==='quotes'&&!old)data.valid_until=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    if(entity==='quotes'&&!old) {
+      data.valid_until=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+      data.tax_percent=6;data.deposit_percent=30;data.rate_km='2.50';data.trips='2';data.distance_source='manual';
+    }
     if(entity==='users')data.password='';
     const tools=entity==='events'?`<section class="form-tools"><h3>Encontre o endereço</h3><p>Preencha o CEP e consulte o endereço. Revise antes de salvar.</p><div class="actions"><button type="button" class="btn btn-secondary btn-sm" id="cep">Consultar CEP</button><button type="button" class="btn btn-secondary btn-sm" id="geocode">Localizar coordenadas</button></div><div id="location-results"></div></section>`:entity==='quotes'?'<section class="form-tools"><h3>Distância para o frete</h3><p>A saída é a sede do buffet. Selecione um evento para consultar o trajeto.</p><button type="button" id="route" class="btn btn-secondary">Consultar distância</button><div id="route-result"></div></section>':'';
-    this.modal(`${old?'Editar':'Cadastrar'} ${definition(entity).singular}`,`<form id="entity-form"><p class="form-note">Campos com * são obrigatórios.${entity==='quotes'?' O total é calculado ao salvar, incluindo itens, equipe e fornecedores.':''}</p>${old&&entity==='quotes'?`<div class="quote-total"><span>Total da versão ${old.version}</span><strong>${money(old.total)}</strong></div>`:''}<div class="form-grid">${fields.map(f=>this.field(f,data[f.key],old)).join('')}</div>${tools}<div class="form-error" role="alert" hidden></div></form>`,`<button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary" type="submit" form="entity-form">Salvar cadastro</button>`);
+    this.modal(`${old?'Editar':'Cadastrar'} ${definition(entity).singular}`,`<form id="entity-form"><p class="form-note">Campos com * são obrigatórios.${entity==='quotes'?' O total é calculado ao salvar, incluindo itens, equipe e fornecedores.':''}</p>${old&&entity==='quotes'?`<div class="quote-total"><span>Total da versão ${old.version}</span><strong>${money(old.total)}</strong></div>`:''}<div class="form-grid">${fields.filter(f=>!f.hidden).map(f=>this.field(f,data[f.key],old)).join('')}</div>${tools}<div class="form-error" role="alert" hidden></div></form>`,`<button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary" type="submit" form="entity-form">Salvar cadastro</button>`);
     const form=this.editor.querySelector<HTMLFormElement>('form')!;
     const get=(key:string)=>(form.elements.namedItem(key) as HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement).value;
     const set=(key:string,value:unknown)=>{(form.elements.namedItem(key) as HTMLInputElement).value=String(value??'');};
@@ -198,6 +212,7 @@ class BuffetApp {
       box.textContent=`${result.source}: ${Number(result.km).toLocaleString('pt-BR',{maximumFractionDigits:3})} km e aproximadamente ${Math.round(Number(result.minutes))} min por trecho. O frete considera ida e volta.`;
     });
     if(entity==='event_items')form.querySelector('[name="item_id"]')?.addEventListener('change',()=>{const item=this.refs.menu_items?.find(i=>i.id===Number(get('item_id')));if(item)set('unit_price',item.price);});
+    if(entity==='event_menu_items'&&old)form.querySelector('[name="quantity"]')?.setAttribute('step','0.001');
     if(entity==='event_staff'){
       const fill=()=>{const e=this.refs.events?.find(r=>r.id===Number(get('event_id')));if(e){set('starts_at',String(e.setup_at).replace(' ','T').slice(0,16));set('ends_at',String(e.teardown_at).replace(' ','T').slice(0,16));}};
       form.querySelector('[name="event_id"]')?.addEventListener('change',fill);if(!old&&get('event_id'))fill();
@@ -211,10 +226,26 @@ class BuffetApp {
     this.confirm.showModal();
   }
   private async eventDetail(event:Row):Promise<void> {
-    const names=(['event_items','event_suppliers','event_staff','quotes'] as Entity[]).filter(e=>this.canRead(e));
+    const names=(['event_guests','event_menu_items','event_items','event_suppliers','event_staff','quotes'] as Entity[]).filter(e=>this.canRead(e));
     const related=await Promise.all(names.map(async e=>({entity:e,rows:unwrap(await api[e].list()).filter(r=>Number(r.event_id)===event.id)})));
-    this.modal(String(event.name),`<div class="detail-heading">${badge(event.status)}<span>${h(label(event.type))} • ${event.guests} convidados</span></div><dl class="detail-grid"><div><dt>Data do evento</dt><dd>${dateTime(event.starts_at)}</dd></div><div><dt>Local</dt><dd>${h(event.venue)} • ${label(event.outdoors)}</dd></div><div><dt>Endereço</dt><dd>${h(event.street)}, ${h(event.number)}<br>${h(event.city)} / ${h(event.state)} • ${h(event.postal_code)}</dd></div><div><dt>Operação</dt><dd>Montagem: ${dateTime(event.setup_at)}<br>Desmontagem: ${dateTime(event.teardown_at)}</dd></div></dl><div class="event-links">${related.map(r=>`<button data-related="${r.entity}"><strong>${r.rows.length}</strong><span>${h(definition(r.entity).label)}</span>${icon('arrow')}</button>`).join('')}</div><section class="weather-panel"><div><h3>${icon('sun')} Previsão para o encontro</h3><p>A previsão fica disponível perto da data. Use-a para planejar eventos ao ar livre.</p></div><button class="btn btn-secondary" id="weather">Consultar previsão</button><div id="weather-result" role="status"></div></section>${event.notes?`<h3>Observações</h3><p class="preserve-lines">${h(event.notes)}</p>`:''}`);
+    const menu=event.menu_id&&this.canRead('menus')?unwrap(await api.menus.list()).find(r=>Number(r.id)===Number(event.menu_id)):undefined;
+    const role=this.info.user?.role,closed=['concluido','cancelado'].includes(String(event.status));
+    const cancellation=String(event.status)==='cancelado'&&role!=='operacoes'?unwrap(await api.cancellations()).find(r=>Number(r.event_id)===Number(event.id)):undefined;
+    const footer=`<button class="btn btn-secondary" data-close>Fechar</button>${event.menu_id&&!closed&&this.canWrite('events')?'<button class="btn btn-secondary" id="apply-menu">Aplicar cardápio</button>':''}${role!=='operacoes'&&!closed?'<button class="btn btn-secondary" id="finance-plan">Gerar parcelas</button><button class="btn btn-danger" id="cancel-event">Cancelar evento</button>':''}${role!=='operacoes'?`<button class="btn btn-secondary" id="archive">${Number(event.archived)?'Desarquivar':'Arquivar'}</button>`:''}`;
+    this.modal(String(event.name),`<div class="detail-heading">${badge(event.status)}<span>${h(label(event.type))} • ${Number(event.adults||0)} adultos e ${Number(event.guests||0)-Number(event.adults||0)} crianças</span></div>${Number(event.archived)?'<p class="form-note">Registro arquivado: permanece no histórico, mas não aparece no painel.</p>':''}<dl class="detail-grid"><div><dt>Data do evento</dt><dd>${dateTime(event.starts_at)}</dd></div><div><dt>Local</dt><dd>${h(event.venue)} • ${label(event.outdoors)}</dd></div><div><dt>Endereço</dt><dd>${h(event.street)}, ${h(event.number)}<br>${h(event.city)} / ${h(event.state)} • ${h(event.postal_code)}</dd></div><div><dt>Operação</dt><dd>Montagem: ${dateTime(event.setup_at)}<br>Desmontagem: ${dateTime(event.teardown_at)}</dd></div><div><dt>Cardápio</dt><dd>${menu?h(menu.name):'Nenhum cardápio selecionado'}</dd></div><div><dt>Convidados</dt><dd>${Number(event.guests||0)} no total</dd></div></dl><div class="event-links">${related.map(r=>`<button data-related="${r.entity}"><strong>${r.rows.length}</strong><span>${h(definition(r.entity).label)}</span>${icon('arrow')}</button>`).join('')}</div><section class="weather-panel"><div><h3>${icon('sun')} Previsão para o encontro</h3><p>A previsão fica disponível perto da data. Use-a para planejar eventos ao ar livre.</p></div><button class="btn btn-secondary" id="weather">Consultar previsão</button><div id="weather-result" role="status"></div></section>${event.notes?`<h3>Observações</h3><p class="preserve-lines">${h(event.notes)}</p>`:''}${cancellation?`<h3>Cancelamento</h3><dl class="totals"><div><dt>Multa retida</dt><dd>${money(cancellation.penalty_amount)}</dd></div><div><dt>Reembolso</dt><dd>${money(cancellation.refund_amount)}</dd></div></dl><p class="preserve-lines">${h(cancellation.reason)}</p>`:''}`,footer);
     this.editor.querySelectorAll<HTMLButtonElement>('[data-related]').forEach(b=>b.addEventListener('click',()=>void this.act(async()=>{this.editor.close();await this.navigate(b.dataset.related as Entity,{key:'event_id',id:event.id,name:String(event.name)});})));
+    this.editor.querySelector<HTMLButtonElement>('#apply-menu')?.addEventListener('click',click=>void this.act(async()=>{
+      const rows=unwrap(await api.applyMenu(Number(event.id)));
+      this.toast(`${rows.length} item(ns) do cardápio calculados para ${event.guests} convidados.`);
+      const fresh=unwrap(await api.events.list()).find(r=>Number(r.id)===Number(event.id))!;
+      await this.eventDetail(fresh);
+    },click.currentTarget as HTMLButtonElement));
+    this.editor.querySelector<HTMLButtonElement>('#cancel-event')?.addEventListener('click',()=>void this.act(()=>this.cancelDialog(event)));
+    this.editor.querySelector<HTMLButtonElement>('#finance-plan')?.addEventListener('click',()=>void this.act(()=>this.financeDialog(event)));
+    this.editor.querySelector<HTMLButtonElement>('#archive')?.addEventListener('click',click=>void this.act(async()=>{
+      unwrap(await api.archive('events',Number(event.id),!Number(event.archived)));
+      this.editor.close();this.toast(!Number(event.archived)?'Evento arquivado.':'Evento restaurado no painel.');await this.navigate('events');
+    },click.currentTarget as HTMLButtonElement));
     const button=this.editor.querySelector<HTMLButtonElement>('#weather')!;
     const output=this.editor.querySelector<HTMLElement>('#weather-result')!;
     const load=async()=>{
@@ -234,11 +265,56 @@ class BuffetApp {
     button.addEventListener('click',()=>void this.act(load,button));
     void this.act(load,button);
   }
-  private quoteDetail(quote:Row):void {
-    const snapshot=JSON.parse(String(quote.snapshot)) as {event:Row;client:Row;items:Row[];suppliers:Row[];staff:Row[]};
-    this.modal(`Proposta • versão ${quote.version}`,`<div class="detail-heading">${badge(quote.status)}<span>Válida até ${dateTime(quote.valid_until)}</span></div><h3>${h(snapshot.event.name)}</h3><p>Para ${h(snapshot.client.name)} • ${h(snapshot.client.email)}<br>${dateTime(snapshot.event.starts_at)} • ${h(snapshot.event.venue)}</p><table class="data-table quote-lines"><thead><tr><th>Item</th><th>Quantidade</th><th>Preço unitário</th></tr></thead><tbody>${snapshot.items.map(item=>`<tr><td>${h(item.name)}</td><td>${h(item.quantity)} ${h(label(item.unit))}</td><td>${money(item.unit_price)}</td></tr>`).join('')}</tbody></table><dl class="totals"><div><dt>Pacote, equipe e fornecedores</dt><dd>${money(quote.subtotal)}</dd></div><div><dt>Frete estimado</dt><dd>${money(quote.freight)}</dd></div><div><dt>Outros serviços</dt><dd>${money(quote.extra)}</dd></div><div><dt>Desconto</dt><dd>${money(quote.discount)}</dd></div><div class="total"><dt>Total</dt><dd>${money(quote.total)}</dd></div></dl><p class="preserve-lines">${h(quote.notes||'Condições a combinar com o cliente.')}</p><p class="form-note">Esta proposta usa os dados preservados no momento de sua geração.</p>`,`<button class="btn btn-secondary" data-close>Fechar</button><button class="btn btn-secondary" id="confirm-preview">Prévia da confirmação</button><button class="btn btn-primary" id="email-preview">Prévia do orçamento</button>`);
+  private async financeDialog(event:Row):Promise<void> {
+    this.modal('Gerar parcelas',`<p class="form-note">O sinal do orçamento aprovado é mantido e o restante é dividido em parcelas mensais, com vencimento no dia 1 de cada mês. Parcelas já pagas são preservadas; as em aberto são recalculadas.</p><form id="finance-form"><div class="form-grid"><div class="field"><label for="finance-count">Número de parcelas</label><input class="form-control" id="finance-count" name="count" type="number" min="0" max="24" step="1" value="3" required></div></div><p class="form-note">Use 0 para manter apenas o sinal.</p><div class="form-error" role="alert" hidden></div></form>`,`<button class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary" id="confirm-plan">Gerar parcelas</button>`);
+    const form=this.editor.querySelector<HTMLFormElement>('#finance-form')!;
+    const button=this.editor.querySelector<HTMLButtonElement>('#confirm-plan')!;
+    button.addEventListener('click',()=>void this.act(async()=>{
+      const count=Number((form.elements.namedItem('count') as HTMLInputElement).value);
+      const rows=unwrap(await api.financePlan({eventId:Number(event.id),count}));
+      this.editor.close();this.toast(`${rows.length} parcela(s) previstas para o evento.`);
+      await this.navigate('installments',{key:'event_id',id:Number(event.id),name:String(event.name)});
+    },button,form.querySelector<HTMLElement>('.form-error')!));
+  }
+  private async cancelDialog(event:Row):Promise<void> {
+    const preview=unwrap(await api.cancelPreview(Number(event.id)));
+    this.modal('Cancelar evento',`<p class="form-note">A política aplica ${preview.percent}% de multa sobre ${money(preview.paid)} já pago, pois faltam ${preview.days} dia(s). Ajuste os valores apenas em caso de acordo comercial.</p><dl class="totals"><div><dt>Total pago</dt><dd>${money(preview.paid)}</dd></div><div><dt>Multa prevista</dt><dd>${money(preview.penalty)}</dd></div><div class="total"><dt>Reembolso previsto</dt><dd>${money(preview.refund)}</dd></div></dl><form id="cancel-form"><div class="form-grid"><div class="field wide"><label for="cancel-reason">Motivo do cancelamento <span aria-hidden="true">*</span></label><textarea class="form-control" id="cancel-reason" name="reason" maxlength="1000" rows="3" required></textarea></div><div class="field"><label for="cancel-penalty">Multa (R$)</label><input class="form-control" id="cancel-penalty" name="penalty" type="number" min="0" step="0.01" value="${h(preview.penalty)}"></div><div class="field"><label for="cancel-refund">Reembolso (R$)</label><input class="form-control" id="cancel-refund" name="refund" type="number" min="0" step="0.01" value="${h(preview.refund)}"></div></div><div class="form-error" role="alert" hidden></div></form>`,`<button class="btn btn-secondary" data-close>Voltar</button><button class="btn btn-danger" id="confirm-cancel">Confirmar cancelamento</button>`);
+    const form=this.editor.querySelector<HTMLFormElement>('#cancel-form')!;
+    const button=this.editor.querySelector<HTMLButtonElement>('#confirm-cancel')!;
+    button.addEventListener('click',()=>void this.act(async()=>{
+      const data=Object.fromEntries(new FormData(form)) as Record<string,string>;
+      unwrap(await api.cancelEvent({eventId:Number(event.id),reason:data.reason,penalty:data.penalty||undefined,refund:data.refund||undefined}));
+      this.editor.close();this.toast('Evento cancelado com multa e reembolso registrados.');await this.navigate('events');
+    },button,form.querySelector<HTMLElement>('.form-error')!));
+  }
+  private async quoteDetail(quote:Row):Promise<void> {
+    const snapshot=JSON.parse(String(quote.snapshot||'{}')) as {event?:Row;client?:Row;items?:Row[];suppliers?:Row[];staff?:Row[];guests?:{adults:number;children:number;childrenByBand?:Row[]}};
+    const client=snapshot.client?.name?snapshot.client:{name:'Cliente'};
+    const items=snapshot.items||[];
+    const rate=Number(quote.rate_km||0),distance=Number(quote.distance_km||0),trips=Number(quote.trips||1);
+    const adults=Number(quote.adults||snapshot.guests?.adults||0),children=Number(quote.children||snapshot.guests?.children||0);
+    const role=this.info.user?.role;
+    const pack=quote.menu_id&&Number(quote.adult_unit_price)>0?`<div><dt>Pacote do cardápio</dt><dd>${adults} adultos × ${money(quote.adult_unit_price)}${children?` + ${children} crianças ${money(quote.child_amount)}`:''}</dd></div>`:'';
+    const footer=`<button class="btn btn-secondary" data-close>Fechar</button><button class="btn btn-secondary" id="quote-history">Histórico de alterações</button>${role!=='operacoes'?`<button class="btn btn-secondary" id="archive-quote">${Number(quote.archived)?'Desarquivar':'Arquivar'}</button>`:''}<button class="btn btn-secondary" id="confirm-preview">Prévia da confirmação</button><button class="btn btn-primary" id="email-preview">Prévia do orçamento</button>`;
+    this.modal(`Proposta • versão ${quote.version}`,`<div class="detail-heading">${badge(quote.status)}<span>Válida até ${dateTime(quote.valid_until)}</span></div><h3>${h(snapshot.event?.name||'Evento')}</h3><p>Para ${h(client.name)}${snapshot.client?.email?` • ${h(snapshot.client.email)}`:''}<br>${dateTime(snapshot.event?.starts_at)} • ${h(snapshot.event?.venue)}</p>${items.length?`<table class="data-table quote-lines"><thead><tr><th>Item avulso</th><th>Quantidade</th><th>Preço unitário</th></tr></thead><tbody>${items.map(item=>`<tr><td>${h(item.name)}</td><td>${h(item.quantity)} ${h(label(item.unit))}</td><td>${money(item.unit_price)}</td></tr>`).join('')}</tbody></table>`:''}<dl class="totals">${pack}<div><dt>Itens, equipe e fornecedores</dt><dd>${money(quote.subtotal)}</dd></div><div><dt>Frete estimado</dt><dd>${money(quote.freight)} <small>${distance.toLocaleString('pt-BR',{maximumFractionDigits:3})} km × ${money(rate)} × ${trips}</small></dd></div><div><dt>Outros serviços</dt><dd>${money(quote.extra)}</dd></div><div><dt>Desconto</dt><dd>${money(quote.discount)}</dd></div><div><dt>Impostos (${Number(quote.tax_percent||0).toLocaleString('pt-BR',{maximumFractionDigits:2})}%)</dt><dd>${money(quote.tax_amount)}</dd></div><div class="total"><dt>Total</dt><dd>${money(quote.total)}</dd></div><div><dt>Sinal exigido</dt><dd>${money(quote.deposit_required)}</dd></div></dl><h3>Análise interna</h3><p class="form-note">Não é enviada ao cliente. Margem já descontados custos e impostos.</p><dl class="totals"><div><dt>Custos estimados</dt><dd>${money(quote.cost_amount)}</dd></div><div><dt>Margem</dt><dd>${money(quote.margin_amount)}</dd></div></dl><p class="preserve-lines">${h(quote.notes||'Condições a combinar com o cliente.')}</p><p class="form-note">Esta proposta usa os dados preservados no momento de sua geração.</p>`,footer);
     this.editor.querySelector('#email-preview')!.addEventListener('click',()=>void this.act(()=>this.email(quote,'orcamento')));
     this.editor.querySelector('#confirm-preview')!.addEventListener('click',()=>void this.act(()=>this.email(quote,'confirmacao')));
+    this.editor.querySelector('#quote-history')!.addEventListener('click',()=>void this.act(()=>this.quoteHistory(quote)));
+    this.editor.querySelector<HTMLButtonElement>('#archive-quote')?.addEventListener('click',click=>void this.act(async()=>{
+      unwrap(await api.archive('quotes',Number(quote.id),!Number(quote.archived)));
+      this.editor.close();this.toast(!Number(quote.archived)?'Orçamento arquivado.':'Orçamento restaurado.');await this.navigate('quotes');
+    },click.currentTarget as HTMLButtonElement));
+  }
+  private async quoteHistory(quote:Row):Promise<void> {
+    const rows=unwrap(await api.changeHistory(Number(quote.id)));
+    this.modal(`Histórico • versão ${quote.version}`,rows.length?`<div class="table-scroll"><table class="data-table"><thead><tr><th>Data</th><th>Situação</th><th>Total antes</th><th>Total depois</th></tr></thead><tbody>${rows.map(row=>{
+      const before=JSON.parse(String(row.before_json||'{}')) as Row,after=JSON.parse(String(row.after_json||'{}')) as Row;
+      return `<tr><td>${h(new Date(String(row.changed_at)).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}</td><td>${badge(before.status)} → ${badge(after.status)}</td><td>${money(before.total)}</td><td>${money(after.total)}</td></tr>`;
+    }).join('')}</tbody></table></div>`:'<div class="empty-state"><h2>Sem alterações registradas</h2><p>Edições em orçamentos enviados ou aprovados aparecem aqui.</p></div>');
+  }
+  private async technical(version:number):Promise<void> {
+    const data=unwrap(await api.technical());if(version!==this.version)return;
+    this.content().innerHTML=`<div class="page-heading"><div><h1>Dados técnicos</h1><p>${h(descriptions.technical)}</p></div></div><section class="table-panel"><div class="section-heading"><div><h2>Migrações aplicadas</h2><p>Controle interno do banco de dados.</p></div></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Versão</th><th>Aplicada em</th></tr></thead><tbody>${data.migrations.map(row=>`<tr><td>${h(row.version)}</td><td>${h(new Date(String(row.applied_at)).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}</td></tr>`).join('')}</tbody></table></div></section><section class="table-panel"><div class="section-heading"><div><h2>Tentativas de e-mail</h2><p>Últimas 200 tentativas registradas, somente para consulta.</p></div></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Orçamento</th><th>Mensagem</th><th>Situação</th><th>Data da tentativa</th></tr></thead><tbody>${data.attempts.map(row=>`<tr><td>#${h(row.quote_id)}</td><td>${h(label(row.kind))}</td><td>${badge(row.status)}</td><td>${h(new Date(String(row.attempted_at)).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'}))}</td></tr>`).join('')}</tbody></table></div>${!data.attempts.length?'<div class="empty-state"><h2>Nenhuma tentativa registrada</h2><p>Os envios realizados pelo aplicativo aparecem aqui.</p></div>':''}</section>`;
   }
   private async email(quote:Row,kind:'orcamento'|'confirmacao'):Promise<void> {
     const preview=unwrap(await api.emailPreview({quoteId:quote.id,kind}));

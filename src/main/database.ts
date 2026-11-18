@@ -47,18 +47,31 @@ export class Database {
       catch(error) {if(this.mysql) await this.mysql.rollback().catch(()=>{});else await this.execute('ROLLBACK').catch(()=>{});throw error;}
     } finally {if(locked) await this.query("SELECT RELEASE_LOCK(CONCAT(DATABASE(), ':buffet_write'))");}
   }
-  async migrate(schema:string):Promise<void> {
+  async migrate(schema:string,version=1):Promise<void> {
     await this.execute('CREATE TABLE IF NOT EXISTS schema_migrations (version INT PRIMARY KEY, applied_at VARCHAR(30) NOT NULL)');
-    if((await this.query('SELECT version FROM schema_migrations WHERE version = 1')).length) {this.persist();return;}
-    const statements=schema.replace(/--[^\n]*/g,'').split(';').map(x=>x.trim()).filter(Boolean);
-    for(let statement of statements) {
-      if(this.sqlite) statement=statement.replace(/INT PRIMARY KEY AUTO_INCREMENT/g,'INTEGER PRIMARY KEY AUTOINCREMENT');
-      try {await this.execute(statement);} catch(error) {
+    if((await this.query('SELECT version FROM schema_migrations WHERE version = ?',[version])).length) {this.persist();return;}
+    const dialect: 'mysql'|'sqlite'=this.sqlite?'sqlite':'mysql';
+    const statements=schema.split(';').map(chunk=>{
+      const marked=chunk.match(/--\s*@(mysql|sqlite)\b/)?.[1] as 'mysql'|'sqlite'|undefined;
+      let sql=chunk.replace(/--[^\n]*/g,'').trim();
+      if(this.sqlite) sql=sql.replace(/INT PRIMARY KEY AUTO_INCREMENT/g,'INTEGER PRIMARY KEY AUTOINCREMENT');
+      return {sql,dialect:marked};
+    }).filter(item=>item.sql);
+    for(const statement of statements) {
+      if(statement.dialect&&statement.dialect!==dialect) continue;
+      try {await this.execute(statement.sql);} catch(error) {
         const code=(error as {code?:string}).code;
-        if(!/^CREATE INDEX/.test(statement)||!(code==='ER_DUP_KEYNAME'||String(error).includes('already exists'))) throw error;
+        const text=String(error);
+        const duplicateIndex=/^CREATE INDEX/.test(statement.sql)&&(code==='ER_DUP_KEYNAME'||text.includes('already exists'));
+        // Reexecução após falha no meio de uma migração: coluna ou tabela já criada.
+        const duplicateColumn=/^ALTER TABLE .*ADD (COLUMN )?/i.test(statement.sql)&&(code==='ER_DUP_FIELDNAME'||text.includes('duplicate column')||text.includes('already exists'));
+        if(!duplicateIndex&&!duplicateColumn) throw error;
       }
     }
-    await this.execute('INSERT INTO schema_migrations(version,applied_at) VALUES(1,?)',[new Date().toISOString()]); this.persist();
+    await this.execute('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)',[version,new Date().toISOString()]); this.persist();
+  }
+  async migrateAll(migrations:Array<{version:number;sql:string}>):Promise<void> {
+    for(const migration of [...migrations].sort((a,b)=>a.version-b.version)) await this.migrate(migration.sql,migration.version);
   }
   private persist():void {
     if(!this.sqlite||!this.file) return;
