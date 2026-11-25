@@ -35,7 +35,7 @@ else {
     const auth=new AuthService(database);const business=new BusinessService(new EntityRepository(database),auth);const integrations=new IntegrationService(business,apiMode);
     session.defaultSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
     session.defaultSession.setPermissionCheckHandler(()=>false);
-    window=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,title:'Ateliê Buffet',backgroundColor:'#f7f7f2',show:false,webPreferences:{preload:join(__dirname,'../preload/index.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,spellcheck:false,devTools:!app.isPackaged}});
+    window=new BrowserWindow({width:1440,height:940,minWidth:700,minHeight:620,title:'Ateliê Buffet',backgroundColor:'#f8f6f8',show:false,webPreferences:{preload:join(__dirname,'../preload/index.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,spellcheck:false,devTools:!app.isPackaged}});
     const page=join(__dirname,'../renderer/index.html');
     const url=pathToFileURL(page).href;
     window.webContents.on('will-navigate',(event)=>event.preventDefault());
