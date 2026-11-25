@@ -242,7 +242,7 @@ export class IntegrationService {
     const mailbox=raw?.match(/^[^<>\r\n]+ <([^<>]+)>$/)?.[1]??raw;
     this.parse(emailAddress,mailbox,'Configure RESEND_FROM_EMAIL com um remetente autorizado no Resend.');
     assert(raw,'Configure RESEND_FROM_EMAIL no .env.');
-    return {key,from:raw};
+    return {key,from:raw,testDomain:/@resend\.dev$/i.test(mailbox??'')};
   }
 
   async sendEmail(raw:unknown):Promise<ApiReply> {
@@ -286,7 +286,9 @@ export class IntegrationService {
         },{
           400:'A solicitação de e-mail foi rejeitada. Revise os dados e o remetente.',
           401:'Chave ausente ou inválida. Confira RESEND_API_KEY.',
-          403:'Envio não autorizado. Confira a chave, o domínio verificado e o remetente no Resend.',
+          403:config.testDomain
+            ?'O remetente @resend.dev é de teste. Para enviar a clientes, verifique um domínio próprio no Resend e configure RESEND_FROM_EMAIL com um endereço desse domínio.'
+            :'Envio não autorizado. Confira a permissão da chave e se o domínio do remetente está verificado na mesma equipe do Resend.',
           409:'Conflito de idempotência. Confira o envio no painel do Resend.',
           422:'Mensagem rejeitada. Confira o destinatário e se o domínio do remetente foi verificado.'
         }));

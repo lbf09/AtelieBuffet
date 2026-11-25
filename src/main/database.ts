@@ -50,9 +50,10 @@ export class Database {
   async migrate(schema:string,version=1):Promise<void> {
     await this.execute('CREATE TABLE IF NOT EXISTS schema_migrations (version INT PRIMARY KEY, applied_at VARCHAR(30) NOT NULL)');
     if((await this.query('SELECT version FROM schema_migrations WHERE version = ?',[version])).length) {this.persist();return;}
+    if(this.mysql&&version===4) await this.archiveLegacyCommercialTables();
     const dialect: 'mysql'|'sqlite'=this.sqlite?'sqlite':'mysql';
     const statements=schema.split(';').map(chunk=>{
-      const marked=chunk.match(/--\s*@(mysql|sqlite)\b/)?.[1] as 'mysql'|'sqlite'|undefined;
+      const marked=chunk.match(/^[ \t]*--[ \t]+@(mysql|sqlite)[ \t]*\r?$/m)?.[1] as 'mysql'|'sqlite'|undefined;
       let sql=chunk.replace(/--[^\n]*/g,'').trim();
       if(this.sqlite) sql=sql.replace(/INT PRIMARY KEY AUTO_INCREMENT/g,'INTEGER PRIMARY KEY AUTOINCREMENT');
       return {sql,dialect:marked};
@@ -64,11 +65,28 @@ export class Database {
         const text=String(error);
         const duplicateIndex=/^CREATE INDEX/.test(statement.sql)&&(code==='ER_DUP_KEYNAME'||text.includes('already exists'));
         // Reexecução após falha no meio de uma migração: coluna ou tabela já criada.
-        const duplicateColumn=/^ALTER TABLE .*ADD (COLUMN )?/i.test(statement.sql)&&(code==='ER_DUP_FIELDNAME'||text.includes('duplicate column')||text.includes('already exists'));
-        if(!duplicateIndex&&!duplicateColumn) throw error;
+        const duplicateColumn=/^ALTER TABLE .*ADD COLUMN\b/i.test(statement.sql)&&(code==='ER_DUP_FIELDNAME'||text.includes('duplicate column'));
+        const foreignKey=statement.sql.match(/^ALTER TABLE (\w+) ADD CONSTRAINT (\w+) FOREIGN KEY\b/i);
+        const duplicateForeignKey=foreignKey&&this.mysql&&(code==='ER_FK_DUP_NAME'||code==='ER_CANT_CREATE_TABLE')&&
+          (await this.query("SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME=? AND CONSTRAINT_NAME=? AND CONSTRAINT_TYPE='FOREIGN KEY'",[foreignKey[1],foreignKey[2]])).length>0;
+        if(!duplicateIndex&&!duplicateColumn&&!duplicateForeignKey) throw error;
       }
     }
     await this.execute('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)',[version,new Date().toISOString()]); this.persist();
+  }
+  private async archiveLegacyCommercialTables():Promise<void> {
+    const tables=[
+      {name:'price_bands',legacyColumn:'min_adults',currentColumn:'min_guests'},
+      {name:'change_history',legacyColumn:'record_id',currentColumn:'quote_id'},
+      {name:'cancellations',legacyColumn:'penalty',currentColumn:'penalty_amount'}
+    ];
+    for(const {name,legacyColumn,currentColumn} of tables) {
+      const columns=await this.query('SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?',[name]);
+      if(!columns.some(column=>column.name===legacyColumn)||columns.some(column=>column.name===currentColumn)) continue;
+      const references=await this.query('SELECT 1 FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_SCHEMA=DATABASE() AND REFERENCED_TABLE_NAME=? LIMIT 1',[name]);
+      assert(!references.length,`A tabela ${name} ainda tem referências e precisa ser migrada antes do reparo comercial.`);
+      await this.execute(`RENAME TABLE ${name} TO ${name}_legacy_004`);
+    }
   }
   async migrateAll(migrations:Array<{version:number;sql:string}>):Promise<void> {
     for(const migration of [...migrations].sort((a,b)=>a.version-b.version)) await this.migrate(migration.sql,migration.version);

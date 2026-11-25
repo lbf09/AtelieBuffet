@@ -91,6 +91,17 @@ class BuffetApp {
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===view);if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
     this.root.querySelector('#breadcrumb')!.textContent=`Seu ateliê / ${view==='dashboard'?'Visão geral':view==='history'?'Histórico de e-mails':view==='technical'?'Dados técnicos':definition(view).label}`;
     this.content().innerHTML='<p class="loading" role="status">Carregando…</p>';
+    try {
+      await this.loadView(view,version,scope);
+    } catch(error) {
+      if(version!==this.version)return;
+      const message=error instanceof Error?error.message:'Não foi possível carregar esta página.';
+      this.content().innerHTML=`<div class="empty-state"><h2>Falha ao carregar</h2><p role="alert">${h(message)}</p><button type="button" class="btn btn-secondary" id="retry-view">Tentar novamente</button></div>`;
+      this.content().querySelector('#retry-view')!.addEventListener('click',()=>void this.act(()=>this.navigate(view,scope)));
+      if(message.includes('sessão terminou')) throw error;
+    }
+  }
+  private async loadView(view:View,version:number,scope?:{key:string;id:number;name:string}):Promise<void> {
     if(view==='dashboard') {await this.dashboard(version);return;}
     if(view==='history') {await this.history(version);return;}
     if(view==='technical') {await this.technical(version);return;}

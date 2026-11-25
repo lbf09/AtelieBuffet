@@ -34,7 +34,7 @@ export class BusinessService {
       const existing=id?await this.repo.find(entity,id):undefined;
       for(const [key,value] of Object.entries(data)) {
         const target:Partial<Record<string,Entity>>={client_id:'clients',event_id:'events',item_id:'menu_items',menu_id:'menus',supplier_id:'suppliers',employee_id:'employees',child_band_id:'child_bands'};
-        if(target[key]) {const parent=await this.repo.find(target[key]!,Number(value));assert(parent.status!=='inativo','Não é possível vincular um cadastro inativo.');}
+        if(target[key]&&value!==null) {const parent=await this.repo.find(target[key]!,Number(value));assert(parent.status!=='inativo','Não é possível vincular um cadastro inativo.');}
       }
       if(entity==='users') await this.validateUser(data,existing,user);
       if(entity==='events') await this.prepareEvent(data,existing);
@@ -49,7 +49,11 @@ export class BusinessService {
       if(entity==='child_bands') await this.validateChildBand(data,existing);
       if(entity==='quotes') await this.prepareQuote(data,existing,user);
       const saved=await this.repo.save(entity,data,id);
-      if(entity==='event_guests') await this.syncGuests(Number(saved.event_id));
+      if(entity==='event_guests') {
+        const eventId=Number(saved.event_id);
+        await this.syncGuests(eventId);
+        if(existing&&Number(existing.event_id)!==eventId) await this.syncGuests(Number(existing.event_id));
+      }
       if(entity==='events') await this.syncMenu(saved,existing);
       if(entity==='quotes') await this.afterQuote(saved,existing,user);
       return saved;
@@ -185,9 +189,9 @@ export class BusinessService {
     const client=await this.repo.find('clients',Number(event.client_id));
     const menuId=event.menu_id?Number(event.menu_id):null;
     const menu=menuId?await this.repo.find('menus',menuId):null;
-    const adults=Number(event.adults||0);
+    const adults=Number(event.adults??Math.max(0,Number(event.guests)-Number(event.children||0)));
     const childRows=await this.pricing.childCounts(Number(event.id));
-    const packagePrice=await this.pricing.price(menuId,adults,childRows);
+    const packagePrice=await this.pricing.price(menuId,adults,childRows,Number(event.guests));
 
     const items=await this.db.query('SELECT i.name,i.unit,i.cost,ei.quantity,ei.unit_price FROM event_items ei JOIN menu_items i ON i.id=ei.item_id WHERE ei.event_id=?',[event.id]);
     let itemsSale=0,itemsCost=0;
@@ -223,7 +227,7 @@ export class BusinessService {
     const margin=revenue-cost-tax;
     const depositPercent=data.deposit_percent===null||data.deposit_percent===undefined?Number(old?.deposit_percent??30):Number(data.deposit_percent);
     const deposit=Math.round(total*depositPercent/100);
-    const children=packagePrice?packagePrice.totalGuests-adults:childRows.reduce((sum,child)=>sum+child.quantity,0);
+    const children=packagePrice?.children??childRows.reduce((sum,child)=>sum+child.quantity,0);
 
     const max=await this.db.query('SELECT COALESCE(MAX(version),0) AS maximum FROM quotes WHERE event_id=?',[event.id]);
     data.version=old?.version||Number(max[0].maximum)+1;data.created_by=old?.created_by||user.id;
