@@ -15,10 +15,12 @@ export class IpcController {
         return {ok:true,data:await this.business.repo.db.exclusive(()=>handler(...args))};
       } catch(error) {
         let message='Não foi possível concluir a operação. Tente novamente.';
+        const code=(error as {code?:string}|null)?.code;
         if(error instanceof BusinessError) message=error.message;
         else if(error instanceof ZodError) message='Dados inválidos. Confira os campos ou a resposta do serviço.';
         else if(/FOREIGN KEY|foreign key constraint|ER_ROW_IS_REFERENCED|ER_NO_REFERENCED_ROW/i.test(String(error))) message='Este registro possui vínculos, ou um vínculo deixou de existir. Remova os vínculos permitidos antes de excluir; registros históricos devem ser mantidos.';
         else if(/UNIQUE|Duplicate entry|ER_DUP_ENTRY/i.test(String(error))) message='Já existe um registro com esse login ou combinação de vínculos.';
+        else if(code==='ER_NO_SUCH_TABLE'||code==='ER_BAD_FIELD_ERROR'||/no such table:|no such column:|has no column named/i.test(String(error))) message='O esquema do banco está incompleto. No MySQL, execute npm run db:migrate no banco configurado. No modo de demonstração, reinicie com a compilação atualizada.';
         return {ok:false,error:message};
       }
     });

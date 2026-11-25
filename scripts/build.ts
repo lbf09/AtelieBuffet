@@ -2,7 +2,7 @@ import {build} from 'esbuild';
 import {mkdir,copyFile,readdir} from 'node:fs/promises';
 async function run():Promise<void> {
   for(const folder of ['main','preload','renderer','database']) await mkdir(`dist/${folder}`,{recursive:true});
-  const schemas=readdir('database').then(files=>files.filter(file=>file.endsWith('.sql')).map(file=>copyFile(`database/${file}`,`dist/database/${file}`)));
+  const schemas=readdir('database').then(files=>Promise.all(files.filter(file=>file.endsWith('.sql')).map(file=>copyFile(`database/${file}`,`dist/database/${file}`))));
   await Promise.all([
     build({entryPoints:['src/main/index.ts'],outfile:'dist/main/index.js',bundle:true,platform:'node',format:'cjs',target:'node24',external:['electron','mysql2/promise','sql.js','dotenv']}),
     build({entryPoints:['src/preload/index.ts'],outfile:'dist/preload/index.js',bundle:true,platform:'node',format:'cjs',target:'node24',external:['electron']}),

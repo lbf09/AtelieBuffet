@@ -4,7 +4,8 @@ import {assert,cents} from '../../shared/validation';
 export interface ChildCount {band_id:number;label:string;min_age:number;max_age:number;percent:number;quantity:number;}
 export interface ChildLine extends ChildCount {unitPrice:number;amount:number;}
 export interface PackagePrice {
-  menuId:number;bandId:number;totalGuests:number;adults:number;children:number;
+  menuId:number;bandId:number|null;totalGuests:number;adults:number;children:number;
+  legacyBandId?:number;legacyChildUnitPrice?:number;
   billableAdults:number;adultUnitPrice:number;adultAmount:number;childAmount:number;
   packageAmount:number;childLines:ChildLine[];
 }
@@ -27,10 +28,10 @@ export class PricingService {
     }));
   }
 
-  async price(menuId:number|null,adults:number,children:ChildCount[]):Promise<PackagePrice|null> {
+  async price(menuId:number|null,adults:number,children:ChildCount[],eventGuests:number):Promise<PackagePrice|null> {
     if(!menuId) return null;
     const bands=await this.db.query('SELECT * FROM price_bands WHERE menu_id = ? ORDER BY min_guests',[menuId]);
-    if(!bands.length) return null;
+    if(!bands.length) return this.legacyPrice(menuId,adults,children,eventGuests);
     const totalGuests=adults+children.reduce((sum,child)=>sum+child.quantity,0);
     const band=bands.find(row=>totalGuests>=Number(row.min_guests)&&
       (row.max_guests===null||row.max_guests===undefined||row.max_guests===''||totalGuests<=Number(row.max_guests)));
@@ -49,6 +50,25 @@ export class PricingService {
       menuId,bandId:Number(band!.id),totalGuests,adults,children:totalGuests-adults,
       billableAdults,adultUnitPrice,adultAmount,childAmount,
       packageAmount:adultAmount+childAmount,childLines
+    };
+  }
+
+  private async legacyPrice(menuId:number,adults:number,children:ChildCount[],eventGuests:number):Promise<PackagePrice|null> {
+    if(this.db.mode!=='mysql') return null;
+    const legacyTable=await this.db.query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='price_bands_legacy_004'");
+    if(!legacyTable.length) return null;
+    const bands=await this.db.query('SELECT id,min_adults,max_adults,price,child_price FROM price_bands_legacy_004 WHERE menu_id=? ORDER BY min_adults,id',[menuId]);
+    if(!bands.length) return null;
+    const band=bands.find(row=>adults>=Number(row.min_adults)&&adults<=Number(row.max_adults));
+    assert(band,`Nenhuma faixa antiga de preço cobre ${adults} adultos neste cardápio. Revise a quantidade ou cadastre as faixas atuais.`);
+    const adultUnitPrice=cents(band.price),childUnitPrice=cents(band.child_price);
+    const childLines=children.map(child=>({...child,unitPrice:childUnitPrice,amount:child.quantity*childUnitPrice}));
+    const childCount=childLines.length?children.reduce((sum,child)=>sum+child.quantity,0):Math.max(0,eventGuests-adults);
+    const adultAmount=adults*adultUnitPrice,childAmount=childCount*childUnitPrice;
+    return {
+      menuId,bandId:null,legacyBandId:band.id,legacyChildUnitPrice:childUnitPrice,
+      totalGuests:adults+childCount,adults,children:childCount,billableAdults:adults,
+      adultUnitPrice,adultAmount,childAmount,packageAmount:adultAmount+childAmount,childLines
     };
   }
 }

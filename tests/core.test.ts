@@ -1,5 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {Database} from '../src/main/database';
 import {loadMigrations} from '../src/main/migrations';
 import {bootstrap} from '../src/main/bootstrap';
@@ -7,12 +10,42 @@ import {AuthService} from '../src/main/services/auth-service';
 import {BusinessService} from '../src/main/services/business-service';
 import {EntityRepository} from '../src/main/repositories/entity-repository';
 import {IntegrationService} from '../src/main/services/integration-service';
+import {PricingService} from '../src/main/services/pricing-service';
 import {seedDemo} from '../src/main/seed';
 import {definition,entityNames,type Entity,type Row,type Input} from '../src/shared/models';
 import {today} from '../src/shared/validation';
 
 const commercial=entityNames.some(n=>String(n)==='price_bands');
 const input=(entity:Entity,row:Row):Input=>Object.fromEntries(definition(entity).fields.filter(f=>f.key!=='password').map(f=>[f.key,row[f.key]]));
+test('usa faixa legada por adultos e tarifa infantil fixa quando não há faixas atuais',async t=>{
+ const db=new Database('mysql'),pricing=new PricingService(db);
+ let current:Row[]=[];
+ t.mock.method(db,'query',async(sql:string)=>{
+  if(sql.includes('FROM price_bands WHERE')) return current;
+  if(sql.includes('information_schema.TABLES')) return [{id:1}];
+  assert.match(sql,/FROM price_bands_legacy_004/);
+  return [
+   {id:1,min_adults:10,max_adults:19,price:'100.00',child_price:'30.00'},
+   {id:2,min_adults:20,max_adults:40,price:'80.00',child_price:'25.00'}
+  ];
+ });
+ const children=[
+  {band_id:1,label:'Até 5 anos',min_age:0,max_age:5,percent:0,quantity:2},
+  {band_id:2,label:'6 a 10 anos',min_age:6,max_age:10,percent:50,quantity:3}
+ ];
+ const legacy=await pricing.price(1,18,children,23);
+ assert.equal(legacy?.bandId,null);
+ assert.equal(legacy?.legacyBandId,1);
+ assert.equal(legacy?.packageAmount,195000);
+ assert.deepEqual(legacy?.childLines.map(row=>row.unitPrice),[3000,3000]);
+ assert.equal((await pricing.price(1,18,[],23))?.childAmount,15000);
+ await assert.rejects(()=>pricing.price(1,4,[],4),/Nenhuma faixa antiga/);
+ current=[{id:1,min_guests:20,max_guests:30,price_per_adult:'100.00',min_billing_guests:0}];
+ const modern=await pricing.price(1,18,children,23);
+ assert.equal(modern?.bandId,1);
+ assert.equal(modern?.legacyBandId,undefined);
+ assert.equal(modern?.childAmount,15000);
+});
 async function fixture(t:{after:(f:()=>Promise<void>)=>void}){
  const db=new Database('demo');await db.connect();await db.migrateAll(loadMigrations('database'));await bootstrap(db);await seedDemo(db);
  const auth=new AuthService(db);await auth.login({login:'buffet',password:'atelie123'});const business=new BusinessService(new EntityRepository(db),auth),api=new IntegrationService(business,'demo');t.after(()=>db.close());return {db,auth,business,api};
@@ -23,6 +56,79 @@ test('conta inicial usa scrypt e não duplica usuários',async t=>{
 test('CRUD de cliente e rollback de transação',async t=>{
  const {db,business:b}=await fixture(t);const c=await b.save('clients',{name:'Teste CRUD',email:'teste@example.com',phone:'0',notes:''});assert.equal((await b.save('clients',{...input('clients',c),name:'Editado'},c.id)).name,'Editado');await b.remove('clients',c.id);assert.ok(!(await b.list('clients')).some(r=>r.id===c.id));
  await assert.rejects(()=>db.transaction(async()=>{await db.execute('INSERT INTO clients(name,email,phone,notes) VALUES(?,?,?,?)',['Rollback','x@example.com','0','']);throw new Error('reverter');}));assert.equal((await db.query("SELECT id FROM clients WHERE name='Rollback'")).length,0);
+});
+test('SQLite persistente bloqueia exclusão de cliente vinculado a evento',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'buffet-db-test-'));
+ const db=new Database('demo',join(dir,'buffet.sqlite'));
+ await db.connect();
+ t.after(async()=>{try{await db.close();}finally{await rm(dir,{recursive:true,force:true});}});
+ await db.migrateAll(loadMigrations('database'));
+ await bootstrap(db);
+ await seedDemo(db);
+ const auth=new AuthService(db);
+ await auth.login({login:'buffet',password:'atelie123'});
+ const business=new BusinessService(new EntityRepository(db),auth);
+ const [event]=await business.list('events');
+ await assert.rejects(()=>business.remove('clients',Number(event.client_id)),/FOREIGN KEY/i);
+ assert.equal((await business.repo.find('clients',Number(event.client_id))).id,event.client_id);
+});
+test('mover crianças por faixa atualiza os totais dos dois eventos',async t=>{
+ const {business}=await fixture(t);
+ const [sample]=await business.list('events');
+ const [band]=await business.list('child_bands');
+ const base={...input('events',sample),status:'rascunho',menu_id:'',adults:10};
+ const source=await business.save('events',{...base,name:'Origem'});
+ const target=await business.save('events',{...base,name:'Destino'});
+ const group=await business.save('event_guests',{event_id:source.id,child_band_id:band.id,quantity:3});
+ await business.save('event_guests',{event_id:target.id,child_band_id:band.id,quantity:3},group.id);
+ assert.equal((await business.repo.find('events',source.id)).guests,10);
+ assert.equal((await business.repo.find('events',target.id)).guests,13);
+});
+test('perfil de operações não cria evento nem lê cadastros restritos',async t=>{
+ const {auth,business}=await fixture(t);
+ const [event]=await business.list('events');
+ await business.save('users',{name:'Equipe de teste',login:'operacao-teste',password:'Senha-teste-2026',role:'operacoes',status:'ativo'});
+ auth.logout();
+ await auth.login({login:'operacao-teste',password:'Senha-teste-2026'});
+ assert.ok((await business.list('events')).length);
+ await assert.rejects(()=>business.list('clients'),/exige perfil/);
+ await assert.rejects(()=>business.list('quotes'),/exige perfil/);
+ await assert.rejects(()=>business.list('child_bands'),/administradores/);
+ await assert.rejects(()=>business.save('events',{...input('events',event),status:'rascunho'}),/novos eventos exige/);
+});
+test('salva evento sem cardápio, lista faixas e orça itens avulsos',async t=>{
+ const {business:b}=await fixture(t);
+ const sample=(await b.list('events'))[0],item=(await b.list('menu_items'))[0];
+ const event=await b.save('events',{...input('events',sample),status:'rascunho',menu_id:''});
+ assert.equal(event.menu_id,null);
+ assert.ok((await b.list('child_bands')).length);
+ await b.save('event_items',{event_id:event.id,item_id:item.id,quantity:1,unit_price:'10.00'});
+ const quote=await b.save('quotes',{event_id:event.id,valid_until:today(),distance_km:0,rate_km:'0.00',trips:'2',distance_source:'manual',extra:'0.00',discount:'0.00',status:'rascunho',notes:''});
+ assert.equal(Number(quote.subtotal),10);
+ assert.equal(Number(quote.total),10.60);
+});
+test('repara banco SQLite já marcado com a migração 002 sem a coluna cost',async t=>{
+ const db=new Database('demo');await db.connect();t.after(()=>db.close());
+ const [initial,commercial,repair]=loadMigrations('database');
+ await db.migrate(initial.sql,initial.version);
+ await db.migrate(commercial.sql.replace(/^ALTER TABLE menu_items ADD COLUMN cost[^;]+;/m,''),commercial.version);
+ await db.execute("INSERT INTO menu_items(name,description,unit,price,restrictions) VALUES('Item existente','','unidade',10,'')");
+ await db.migrate(repair.sql,repair.version);
+ assert.deepEqual(await db.query('SELECT name,cost FROM menu_items'),[{name:'Item existente',cost:0}]);
+});
+test('completa esquema comercial parcial mesmo com as versões anteriores registradas',async t=>{
+ const db=new Database('demo');await db.connect();t.after(()=>db.close());
+ const migrations=loadMigrations('database');
+ await db.migrate(migrations[0].sql,1);
+ await db.migrate('ALTER TABLE events ADD COLUMN adults INT NOT NULL DEFAULT 0;',2);
+ await db.migrate('',3);
+ await db.execute("INSERT INTO menu_items(name,description,unit,price,restrictions) VALUES('Item preservado','','unidade',10,'')");
+ await db.migrateAll(migrations);
+ assert.deepEqual(await db.query('SELECT name,cost FROM menu_items'),[{name:'Item preservado',cost:0}]);
+ assert.deepEqual(await db.query('SELECT percent FROM child_bands'),[]);
+ assert.deepEqual(await db.query('SELECT child_band_id FROM event_guests'),[]);
+ assert.deepEqual(await db.query('SELECT adult_unit_price,deposit_required FROM quotes'),[]);
+ assert.deepEqual(await db.query('SELECT version FROM schema_migrations ORDER BY version'),[1,2,3,4].map(version=>({version})));
 });
 test('orçamento, aprovação e confirmação respeitam as regras',async t=>{
  const {business:b,db}=await fixture(t),event=(await b.list('events'))[0];
@@ -176,7 +282,7 @@ test('Resend envia só após confirmação, preserva o histórico e impede dupli
    assert.match(key,/^[a-f0-9]{64}$/);
    keys.push(key);
    const body=JSON.parse(String(init.body));
-   assert.equal(body.from,'Ateliê <buffet@example.com>');
+   assert.equal(body.from,process.env.RESEND_FROM_EMAIL);
    assert.ok(Array.isArray(body.to)&&body.to.length===1);
    assert.match(body.text,/Total:/);
    if(status===503) throw new TypeError('connection lost');
@@ -190,7 +296,12 @@ test('Resend envia só após confirmação, preserva o histórico e impede dupli
  assert.match(preview.text,/Validade:/);
  await assert.rejects(()=>live.sendEmail('sem confirmação'),/prévia/);
  assert.equal(fetchMock.mock.callCount(),0);
- await assert.rejects(()=>live.sendEmail(preview.token),/domínio verificado/);
+ process.env.RESEND_FROM_EMAIL='Ateliê <onboarding@resend.dev>';
+ await assert.rejects(()=>live.sendEmail(preview.token),/@resend\.dev é de teste.*RESEND_FROM_EMAIL/);
+ assert.equal((await live.history())[0].status,'falhou');
+ process.env.RESEND_FROM_EMAIL='Ateliê <buffet@example.com>';
+ const verifiedSenderPreview=await live.previewEmail(inputEmail);
+ await assert.rejects(()=>live.sendEmail(verifiedSenderPreview.token),/domínio do remetente está verificado/);
  assert.equal((await live.history())[0].status,'falhou');
  assert.equal((await business.repo.find('quotes',quote.id)).status,'rascunho');
  status=200;
@@ -199,7 +310,7 @@ test('Resend envia só após confirmação, preserva o histórico e impede dupli
  assert.equal(result.providerId,'resend-id');
  assert.equal(result.status,'aceito_provedor');
  assert.equal((await live.history())[0].provider_id,'resend-id');
- assert.equal(keys[0],keys[1]);
+ assert.equal(keys[1],keys[2]);
  await assert.rejects(()=>live.sendEmail(retry.token),/já utilizada/);
  const restarted=new IntegrationService(business,'live');
  const duplicateAfterRestart=await restarted.previewEmail(inputEmail);
@@ -217,10 +328,10 @@ test('Resend envia só após confirmação, preserva o histórico e impede dupli
  status=503;
  await assert.rejects(()=>live.sendEmail(confirmPreview.token),/resultado do envio é incerto/);
  assert.equal((await live.history())[0].status,'resultado_incerto');
- assert.notEqual(keys[1],keys[2]);
+ assert.notEqual(keys[2],keys[3]);
  const uncertainRetry=await restarted.previewEmail(confirmation);
  await assert.rejects(()=>restarted.sendEmail(uncertainRetry.token),/pendente ou incerto/);
- assert.equal(fetchMock.mock.callCount(),3);
+ assert.equal(fetchMock.mock.callCount(),4);
  assert.equal((await db.query('SELECT provider_id FROM email_attempts WHERE status=?',['aceito_provedor'])).length,1);
 });
 

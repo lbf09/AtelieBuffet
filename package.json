@@ -12,6 +12,7 @@
     "build": "npm run typecheck && tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "npm run build && playwright test tests/e2e --workers=1 --output=.data/e2e-results",
     "db:migrate": "tsx scripts/migrate.ts",
     "admin:reset": "tsx scripts/reset-admin.ts"
   },

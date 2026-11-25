@@ -23,7 +23,7 @@ O `npm start` compila o projeto e inicia o Electron. O banco padrão é SQLite l
 | `OPENROUTESERVICE_API_KEY` | Chave autorizada para geocodificação e rotas. |
 | `BUFFET_ORIGIN_CEP` | `13484332`, CEP de referência da sede no COTIL. O número 1888 consta no endereço oficial. |
 | `RESEND_API_KEY` | Chave com permissão de envio no Resend. |
-| `RESEND_FROM_EMAIL` | Remetente autorizado, como `buffet@seudominio.com.br` ou `"Ateliê Buffet <buffet@seudominio.com.br>"`. Use um domínio verificado quando exigido pelo Resend. |
+| `RESEND_FROM_EMAIL` | Para enviar a clientes, use um remetente do seu domínio verificado no Resend, como `"Ateliê Buffet <buffet@seudominio.com.br>"`. |
 
 ViaCEP e Open-Meteo dispensam chave nesta configuração. Aplique as condições de uso e cotas dos provedores ao ambiente em que executar o aplicativo. O arquivo `.env` é carregado na execução de desenvolvimento e deve ficar fora do Git e do pacote. Reinicie o Electron após editar a configuração.
 
