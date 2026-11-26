@@ -15,6 +15,17 @@ npm start
 
 O `npm start` compila o projeto e inicia o Electron. O banco padrão é SQLite local. O login inicial de um banco novo é **buffet**, com senha **atelie123**. Use sua conta habitual se já houver um banco configurado.
 
+### Modo apresentação
+
+Após entrar, clique em **Modo apresentação** na barra superior. O roteiro começa automaticamente com exemplos fictícios de cadastros, eventos, cardápios, operação, orçamento, pagamentos e integrações. Os módulos disponíveis respeitam o perfil da conta.
+
+- No painel, marque quais funcionalidades entram no roteiro. Clique no nome de uma função para ir diretamente a ela.
+- Para mostrar somente uma funcionalidade, use **Limpar seleção** e clique na função desejada.
+- Use **Pausar / Continuar**, **Anterior**, **Próxima**, **Reiniciar** e o seletor de ritmo (3, 6 ou 10 segundos por etapa).
+- **Sair da apresentação** ou **Esc** retorna à mesma tela. Ao colocar o aplicativo em segundo plano, o roteiro pausa.
+
+A apresentação usa prévias dos cadastros e preenchimento automático com dados fictícios, isolados do banco. Não salva registros, não chama provedores, não exporta arquivos e não envia e-mails. Ao finalizar os módulos selecionados, para automaticamente e permite reproduzir novamente.
+
 ### Configuração das integrações
 
 | Variável | Valor |

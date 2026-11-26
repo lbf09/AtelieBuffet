@@ -382,6 +382,8 @@ test('cardápio gera quantidades automáticas e permite ajuste',async t=>{
 });
 
 test('cancelamento calcula multa e reembolso e aceita ajuste manual',async t=>{
+ // Fixe o relógio ao meio-dia em São Paulo: o seed usa UTC e a política usa a data local.
+ t.mock.timers.enable({apis:['Date'],now:new Date(`${today()}T15:00:00Z`)});
  const {business:b,db}=await fixture(t);
  const events=await b.list('events');
  const soon=events.find(row=>String(row.name)==='Um novo ciclo · Marina')!;

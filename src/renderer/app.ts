@@ -1,5 +1,6 @@
 import {definition, entities, entityNames, type ApiReply, type AppInfo, type Entity, type Field, type Input, type Result, type Row} from '../shared/models';
 import {escapeHtml as h, money, dateTime, label, badge, icon} from './format';
+import {Presentation} from './presentation';
 
 type View = Entity | 'dashboard' | 'history' | 'technical';
 const operations:Entity[]=['events','event_menu_items','event_items','menus','menu_items','menu_compositions','suppliers','event_suppliers','employees','event_staff'];
@@ -81,6 +82,12 @@ class BuffetApp {
       const names=entityNames.filter(e=>definition(e).group===group&&this.canRead(e));
       return names.length?`<div class="nav-group">${group}</div>${names.map(e=>`<button data-view="${e}" class="nav-item">${icon(navIcons[e]||'link')} ${h(definition(e).label)}</button>`).join('')}`:'';
     }).join('')}${this.canRead('quotes')?`<button data-view="history" class="nav-item">${icon('mail')} Histórico de e-mails</button>`:''}${user.role==='administrador'?`<button data-view="technical" class="nav-item">${icon('check')} Dados técnicos</button>`:''}</nav><div class="profile"><div class="avatar">${h(user.name.slice(0,1).toUpperCase())}</div><div><strong>${h(user.name)}</strong><small>${label(user.role)}</small></div><button id="logout" class="icon-button" aria-label="Sair da conta" title="Sair da conta">${icon('logout')}</button></div></aside><div class="workspace-main"><header class="topbar"><span id="breadcrumb">Seu ateliê / Visão geral</span><span class="mode-indicator">${this.info.apiMode==='demo'?'Demonstração • APIs simuladas':'Integrações reais'}<span class="mode-dot"></span></span></header><main id="content" tabindex="-1"></main><footer class="workspace-footer">Ateliê Buffet <span>Feito para cuidar dos detalhes.</span></footer></div></div>`;
+    const presentationButton=document.createElement('button');
+    presentationButton.id='open-presentation';presentationButton.className='btn btn-secondary btn-sm';
+    presentationButton.type='button';presentationButton.innerHTML=`${icon('presentation')} Modo apresentação`;
+    presentationButton.setAttribute('aria-haspopup','dialog');
+    presentationButton.addEventListener('click',()=>new Presentation(entity=>this.canRead(entity)).open());
+    this.root.querySelector('.topbar')!.insertBefore(presentationButton,this.root.querySelector('.mode-indicator'));
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button=>button.addEventListener('click',()=>void this.act(()=>this.navigate(button.dataset.view as View))));
     this.root.querySelector<HTMLButtonElement>('#logout')!.addEventListener('click',()=>void this.act(async()=>{window.clearInterval(this.weatherTimer);unwrap(await api.logout());this.refs={};this.rows=[];await this.start();}));
     await this.navigate('dashboard');

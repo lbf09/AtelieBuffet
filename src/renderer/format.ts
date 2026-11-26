@@ -19,6 +19,7 @@ export const label = (value: unknown): string => labels[String(value)] || String
 export const badge = (value: Value): string => `<span class="status status-${escapeHtml(value)}">${escapeHtml(label(value))}</span>`;
 export const icon = (name: string): string => {
   const paths:Record<string,string>={
+    presentation:'<rect x="3" y="3" width="18" height="13" rx="2"/><path d="m10 6 5 3.5-5 3.5ZM12 16v5m-4 0 4-3 4 3"/>',
     home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>',
     calendar:'<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2m4 0h2m-8 3h2"/>',
     people:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v3"/>',
