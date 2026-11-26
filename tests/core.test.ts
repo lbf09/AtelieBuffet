@@ -220,15 +220,15 @@ test('openrouteservice geocodifica e calcula o trajeto rodoviário com conversã
      assert.equal(url.pathname,'/ws/13484332/json/');
      return Response.json({logradouro:'Rua Paschoal Marmo',bairro:'Centro',localidade:'Limeira',uf:'SP'});
    }
-   assert.equal(url.hostname,'api.openrouteservice.org');
-   if(url.pathname==='/geocode/search') {
+   assert.equal(url.hostname,'api.heigit.org');
+   if(url.pathname==='/pelias/v1/search') {
      assert.equal(url.searchParams.get('api_key'),'test-key');
      assert.equal(url.searchParams.get('boundary.country'),'BR');
      if(url.searchParams.get('text')==='Endereço inexistente') return Response.json({features:[]});
      return Response.json({features:[{geometry:{type:'Point',coordinates:origin},
        properties:{label:'Rua Paschoal Marmo 1888, Limeira',street:'Rua Paschoal Marmo',housenumber:'1888'}}]});
    }
-   assert.equal(url.pathname,'/v2/directions/driving-car/json');
+   assert.equal(url.pathname,'/openrouteservice/v2/directions/driving-car/json');
    assert.equal(init.method,'POST');
    assert.equal(new Headers(init.headers).get('Authorization'),'test-key');
    assert.deepEqual(JSON.parse(String(init.body)),{coordinates:[origin,destination]});

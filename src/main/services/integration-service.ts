@@ -138,7 +138,7 @@ export class IntegrationService {
 
   private async searchAddresses(address:string) {
     const params=new URLSearchParams({api_key:this.orsKey(),text:address,'boundary.country':'BR',size:'5'});
-    const {features}=await this.http.json(orsName,`https://api.openrouteservice.org/geocode/search?${params}`,geocodeSchema,{},
+    const {features}=await this.http.json(orsName,`https://api.heigit.org/pelias/v1/search?${params}`,geocodeSchema,{},
       {401:'Chave inválida. Confira OPENROUTESERVICE_API_KEY.',403:'Chave inválida ou sem permissão para geocodificação.'});
     assert(features.length,'Nenhum local encontrado. Revise o endereço ou informe as coordenadas manualmente.');
     return features;
@@ -196,7 +196,7 @@ export class IntegrationService {
     const originCep=process.env.BUFFET_ORIGIN_CEP??'13484332';
     return this.cached('route:'+JSON.stringify([data,destination,originCep]),async()=>{
       const origin='origin' in data?data.origin:await this.buffetOrigin();
-      const result=await this.http.json(orsName,'https://api.openrouteservice.org/v2/directions/driving-car/json',directionsSchema,{
+      const result=await this.http.json(orsName,'https://api.heigit.org/openrouteservice/v2/directions/driving-car/json',directionsSchema,{
         method:'POST',headers:{Authorization:this.orsKey(),'Content-Type':'application/json'},
         body:JSON.stringify({coordinates:[origin,destination]})
       },{
